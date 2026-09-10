@@ -1,0 +1,7 @@
+node_modules/
+dist/
+.data/
+.aws-sam/
+.aws-build/
+.env
+aws/samconfig.toml
