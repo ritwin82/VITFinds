@@ -8,9 +8,9 @@ A student lost-and-found platform and campus marketplace. Includes a working loc
 node server.mjs
 ```
 
-Open http://127.0.0.1:3000. The local server binds only to loopback and starts with clearly labeled sample listings. Use **Switch account** to try Alex, Priya, Arjun, or the campus moderator. No passwords or email verification are simulated. This demo login must never be exposed on a public server.
+Open http://127.0.0.1:3000. Create a local account with an approved university email and a strong password, or use the clearly labeled demo account shortcut. Use **Switch account** to try Alex, Priya, Arjun, or the campus moderator. The demo login must never be exposed on a public server.
 
-The backend saves changes in `.data/state.json` and photos in `.data/uploads/`; both are ignored by Git. Local sessions last 24 hours or until server restart. The development server automatically opens Alex's sample account on a fresh page load. AWS mode never offers demo authentication or seeds sample records.
+The backend saves changes in `.data/state.json`, photos in `.data/uploads/`, and a randomly generated JWT signing secret in `.data/jwt-secret`; all are ignored by Git. Passwords are hashed with Node.js `scrypt` and unique salts. Local JWTs use HS256 signatures, expire after 24 hours, are stored in browser session storage, and are revoked in memory on logout. Local accounts validate the university email domain but cannot prove ownership of that address because no email service is used. AWS mode uses Cognito email verification and never offers demo authentication or seeds sample records.
 
 ## Implemented
 
@@ -24,6 +24,7 @@ The backend saves changes in `.data/state.json` and photos in `.data/uploads/`; 
 - Reporting, moderator-only review, and removal of reported listings.
 - Responsive interface, native accessible dialogs, escaped student content, validation, ownership checks, and participant checks.
 - AWS university-email signup, confirmation, sign-in, password reset, and verified-email enforcement.
+- Local signup and login with scrypt password hashing, signed JWT authentication, expiry checks, login throttling, and protected API routes.
 - Optional WebMCP search and saved-item tools, feature-detected. These are not tested in a live WebMCP browser.
 
 ## Verify and build
