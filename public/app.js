@@ -1,116 +1,967 @@
-const config = window.VITFINDS_CONFIG;
+/* VITFinds front-end
+   Talks to the same API as before (/api/state, /api/listings, /api/claims, ...).
+   Works with the local Node server (demo mode) and with the AWS deployment (Cognito). */
+
+const config = window.VITFINDS_CONFIG || {};
 const demo = !config.apiUrl;
 const $ = s => document.querySelector(s);
-const esc = v => String(v ?? '').replace(/[&<>"']/g, x => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[x]));
-const materialIcon = path => `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${path}"/></svg>`;
-const storeIcon = '<svg viewBox="0 -960 960 960" aria-hidden="true"><path d="M841-518v318q0 33-23.5 56.5T761-120H201q-33 0-56.5-23.5T121-200v-318q-23-21-35.5-54t-.5-72l42-136q8-26 28.5-43t47.5-17h556q27 0 47 16.5t29 43.5l42 136q12 39-.5 71T841-518Zm-272-42q27 0 41-18.5t11-41.5l-22-140h-78v148q0 21 14 36.5t34 15.5Zm-180 0q23 0 37.5-15.5T441-612v-148h-78l-22 140q-4 24 10.5 42t37.5 18Zm-178 0q18 0 31.5-13t16.5-33l22-154h-78l-40 134q-6 20 6.5 43t41.5 23Zm540 0q29 0 42-23t6-43l-42-134h-76l22 154q3 20 16.5 33t31.5 13ZM201-200h560v-282q-5 2-6.5 2H751q-27 0-47.5-9T663-518q-18 18-41 28t-49 10q-27 0-50.5-10T481-518q-17 18-39.5 28T393-480q-29 0-52.5-10T299-518q-21 21-41.5 29.5T211-480h-4.5q-2.5 0-5.5-2v282Z"/></svg>';
-const icons = {
-  grid: materialIcon('M3 13h8V3H3v10Zm0 8h8v-6H3v6Zm10 0h8V11h-8v10Zm0-18v6h8V3h-8Z'),
-  lost: materialIcon('M9.5 3a6.5 6.5 0 1 0 4.06 11.58L19.49 20.5 21 19l-5.92-5.92A6.5 6.5 0 0 0 9.5 3Zm0 2a4.5 4.5 0 1 1 0 9 4.5 4.5 0 0 1 0-9Z'),
-  found: materialIcon('M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm-2 15-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9Z'),
-  sale: storeIcon,
-  saved: materialIcon('M12 21.35 10.55 20.03C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09A6 6 0 0 1 16.5 3C19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35Z'),
-  mine: materialIcon('M20 8H4V4h16v4Zm0 2v10H4V10h16Zm-11 3v2h6v-2H9ZM4 2a2 2 0 0 0-2 2v4c0 .74.4 1.38 1 1.73V20a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V9.73A2 2 0 0 0 22 8V4a2 2 0 0 0-2-2H4Z'),
-  messages: materialIcon('M20 2H4a2 2 0 0 0-2 2v18l4-4h14a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2Z'),
-  activity: materialIcon('M13 3a9 9 0 1 0 8.95 10H20a7 7 0 1 1-2.05-4.95L15 11h7V4l-2.63 2.63A8.94 8.94 0 0 0 13 3Zm-1 5v5l4.28 2.54.72-1.21-3.5-2.08V8H12Z'),
-  admin: materialIcon('M12 2 4 5v6c0 5.05 3.41 9.76 8 11 4.59-1.24 8-5.95 8-11V5l-8-3Zm0 9.99h6c-.46 3.58-2.85 6.77-6 7.93V12H6V6.3l6-2.25v7.94Z')
-};
-const art = { headphones: '🎧', books: '📚', backpack: '🎒', cycle: '🚲', keys: '🔑', lamp: '💡' };
+const esc = v => String(v ?? '').replace(/[&<>"']/g, x => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[x]));
+
+/* ---------- Constants (must match src/domain.mjs) ---------- */
 const categories = ['Electronics', 'Books & stationery', 'ID & essentials', 'Clothing', 'Cycles & sports', 'Hostel essentials', 'Other'];
 const locations = ['SJT', 'TT', 'Main Library', 'Foodys', 'Mens Hostel', 'Ladies Hostel', 'Sports Ground', 'Main Gate', 'Other'];
-let state, view = 'all', query = '', category = 'All categories', location = 'Anywhere on campus', sort = 'newest', conversationId = null;
-let sidebarCollapsed = localStorage.getItem('vitfinds-sidebar') === 'collapsed';
+const VIEWS = ['home', 'all', 'lost', 'found', 'sale', 'saved', 'mine', 'messages', 'activity', 'admin'];
+const ALL_CATEGORIES = 'All categories';
+const ANYWHERE = 'Anywhere on campus';
+const art = { headphones: '🎧', books: '📚', backpack: '🎒', cycle: '🚲', keys: '🔑', lamp: '💡' };
+const categoryEmoji = { 'Electronics': '🎧', 'Books & stationery': '📚', 'ID & essentials': '🪪', 'Clothing': '🧥', 'Cycles & sports': '🚲', 'Hostel essentials': '🛏️', 'Other': '📦' };
+
+/* ---------- Icons ---------- */
+const paths = {
+  search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
+  pin: '<path d="M12 21s-7-6.2-7-11a7 7 0 0 1 14 0c0 4.8-7 11-7 11z"/><circle cx="12" cy="10" r="2.5"/>',
+  calendar: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/>',
+  clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  heart: '<path d="M12 20s-7.5-4.6-9.3-9.4A5 5 0 0 1 12 6.8a5 5 0 0 1 9.3 3.8C19.5 15.4 12 20 12 20z"/>',
+  bell: '<path d="M6 16v-5a6 6 0 0 1 12 0v5l2 2H4z"/><path d="M10 21h4"/>',
+  chat: '<path d="M4 5h16v11H9l-5 4z"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  arrow: '<path d="M7 17 17 7M8 7h9v9"/>',
+  right: '<path d="m9 6 6 6-6 6"/>',
+  left: '<path d="m15 6-6 6 6 6"/>',
+  menu: '<path d="M4 7h16M4 12h16M4 17h16"/>',
+  close: '<path d="M6 6l12 12M18 6 6 18"/>',
+  flag: '<path d="M5 21V4h11l-2 4 2 4H5"/>',
+  shield: '<path d="M12 3 5 6v6c0 4.5 3 7.7 7 9 4-1.3 7-4.5 7-9V6z"/><path d="m9 12 2 2 4-4"/>',
+  tag: '<path d="M3 12V4h8l10 10-8 8z"/><circle cx="7.5" cy="8.5" r="1.5"/>',
+  check: '<path d="m5 12 5 5 9-10"/>',
+  box: '<path d="M3 7l9-4 9 4v10l-9 4-9-4z"/><path d="M3 7l9 4 9-4M12 11v10"/>',
+  lost: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5M9.5 9a1.7 1.7 0 1 1 2.3 1.6c-.5.2-.8.6-.8 1.1V12M11 14.5v.01"/>',
+  found: '<path d="M7 11V6a1.5 1.5 0 0 1 3 0v4M10 10V4.5a1.5 1.5 0 0 1 3 0V10M13 10V5.5a1.5 1.5 0 0 1 3 0V11M16 11V8.5a1.5 1.5 0 0 1 3 0V14a7 7 0 0 1-7 7h-.5a7 7 0 0 1-5.6-2.8L3.6 15a1.6 1.6 0 0 1 2.5-2L7 14"/>',
+  sale: '<path d="M3 12V4h8l10 10-8 8z"/><circle cx="7.5" cy="8.5" r="1.5"/>',
+  logout: '<path d="M15 4h4v16h-4M10 8l-4 4 4 4M6 12h10"/>',
+  user: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
+  camera: '<path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/>',
+  lock: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
+  sparkle: '<path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5 18 18M18 6l-2.5 2.5M8.5 15.5 6 18"/>'
+};
+const icon = (name, cls = '') => `<svg class="i ${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name]}</svg>`;
+
+/* ---------- App state ---------- */
+let state = null;
+let view = 'home';
+let query = '', category = ALL_CATEGORIES, place = ANYWHERE, sort = 'newest';
+let conversationId = null;
+let showThread = false; // on phones: show the open chat instead of the inbox list
+let heroIndex = 0;
+let homeTab = 'found';
 let authToken = sessionStorage.getItem('vitfinds-token') || '';
-let noticeTimer;
-function toast(message) { $('#toast').textContent = message; $('#toast').classList.add('visible'); clearTimeout(noticeTimer); noticeTimer = setTimeout(() => $('#toast').classList.remove('visible'), 4500); }
+let toastTimer;
+
+/* ---------- Helpers ---------- */
+function toast(message) {
+  const t = $('#toast');
+  t.textContent = message;
+  t.classList.add('visible');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove('visible'), 4500);
+}
+
 async function api(path, body, method) {
-  const response = await fetch((config.apiUrl || '') + '/api' + path, { method: method || (body ? 'POST' : 'GET'), credentials: demo ? 'same-origin' : 'omit', headers: { 'Content-Type': 'application/json', ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}) });
-  const result = await response.json(); if (!response.ok) { const e = new Error(result.error || result.message || 'Request failed. Please try again.'); e.status = response.status; throw e; } return result;
+  const response = await fetch((config.apiUrl || '') + '/api' + path, {
+    method: method || (body ? 'POST' : 'GET'),
+    credentials: demo ? 'same-origin' : 'omit',
+    headers: { 'Content-Type': 'application/json', ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}) },
+    ...(body ? { body: JSON.stringify(body) } : {})
+  });
+  const result = await response.json();
+  if (!response.ok) {
+    const e = new Error(result.error || result.message || 'Request failed. Please try again.');
+    e.status = response.status;
+    throw e;
+  }
+  return result;
 }
+
 async function refresh() { state = await api('/state'); render(); }
+
+const imageUrl = path => (config.imageBaseUrl || '') + path;
 const userName = id => state.users.find(x => x.id === id)?.name || 'Student';
-const initials = name => name.split(' ').map(x => x[0]).slice(0,2).join('');
+const firstName = name => name.split(' ')[0];
+const initials = name => name.split(' ').map(x => x[0]).slice(0, 2).join('').toUpperCase();
 const currency = n => Number(n) === 0 ? 'Free' : '₹' + Number(n).toLocaleString('en-IN');
-const ago = date => { const h = Math.max(0, Math.floor((Date.now()-new Date(date))/3600000)); return h < 1 ? 'Just now' : h < 24 ? `${h}h ago` : `${Math.floor(h/24)}d ago`; };
-function photo(item, extra = '') { return item.images?.length ? `<img class="item-image ${extra}" src="${esc((config.imageBaseUrl || '') + item.images[0])}" alt="${esc(item.title)}" loading="lazy">` : `<div class="item-art ${esc(item.art || item.type)} ${extra}" aria-label="${item.demo ? 'Sample item illustration' : 'No photo uploaded'}"><span>${art[item.art] || ({lost:'⌕',found:'◎',sale:'♲'}[item.type])}</span></div>`; }
-const label = item => item.type === 'sale' ? 'For sale' : item.type === 'lost' ? 'Lost' : 'Found';
-function nav(key, title, icon, count = '') { return `<button class="nav-item ${view === key ? 'selected' : ''}" data-action="nav" data-id="${key}" aria-label="${title}" title="${title}"><span class="nav-icon">${icon}</span><span class="nav-label">${title}</span>${count ? `<span class="nav-count">${count}</span>` : ''}</button>`; }
-function shell(content) {
-  const unread = state.notifications.filter(x => !x.read).length;
-  return `<aside class="sidebar ${sidebarCollapsed?'collapsed':''}"><div class="sidebar-head"><a class="brand" href="#all" data-action="nav" data-id="all"><span class="brand-mark">v<span>f</span></span><span class="brand-name">VIT<span class="brand-light">Finds</span></span></a><button class="sidebar-toggle" data-action="sidebar-toggle" aria-label="${sidebarCollapsed?'Expand':'Minimize'} sidebar" title="${sidebarCollapsed?'Expand':'Minimize'} sidebar"><span aria-hidden="true">${sidebarCollapsed?'›':'‹'}</span></button><button class="sidebar-account" data-action="account" aria-label="Open account menu">${esc(initials(state.user.name))}</button></div><button class="campus" data-action="campus" aria-haspopup="dialog" aria-label="Select VIT campus" title="VIT Vellore"><span class="campus-icon">V</span><strong>VIT Vellore</strong><span class="campus-chevron" aria-hidden="true"></span></button><p class="nav-caption">EXPLORE</p><nav aria-label="Main navigation">${nav('all','Campus feed',icons.grid)}${nav('lost','Lost items',icons.lost)}${nav('found','Found items',icons.found)}${nav('sale','Marketplace',icons.sale)}<div class="nav-divider"></div><p class="nav-caption">YOUR SPACE</p>${nav('saved','Saved items',icons.saved,state.saved.length)}${nav('mine','My listings',icons.mine)}${nav('messages','Messages',icons.messages,state.conversations.length)}${nav('activity','Activity',icons.activity,unread)}${state.user.role === 'admin' ? nav('admin','Moderation',icons.admin,state.reports.filter(r=>r.status==='open').length) : ''}</nav><button class="profile" data-action="account" aria-label="Open account menu" title="${esc(state.user.name)}"><span class="avatar">${esc(initials(state.user.name))}</span><span class="profile-copy"><strong>${esc(state.user.name)}</strong><small>${demo ? (state.user.id.startsWith('demo-')?'Demo account':'Local account') : 'Verified student'}</small></span><span class="profile-more">⋯</span></button></aside><div class="main-wrap ${sidebarCollapsed?'sidebar-is-collapsed':''}"><main>${content}</main></div>`;
+const ago = date => {
+  const mins = Math.max(0, Math.floor((Date.now() - new Date(date)) / 60000));
+  if (mins < 1) return 'Just now';
+  if (mins < 60) return `${mins}m ago`;
+  const h = Math.floor(mins / 60);
+  return h < 24 ? `${h}h ago` : `${Math.floor(h / 24)}d ago`;
+};
+const niceDate = d => new Date(d + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+const typeLabel = t => t === 'sale' ? 'For sale' : t === 'lost' ? 'Lost' : 'Found';
+const placeVerb = t => t === 'sale' ? 'Pickup at' : t === 'lost' ? 'Last seen at' : 'Found at';
+const unreadCount = () => state.notifications.filter(x => !x.read).length;
+const openReports = () => state.reports.filter(r => r.status === 'open').length;
+const today = () => new Date().toISOString().slice(0, 10);
+
+function matchesFor(l) {
+  if (l.type !== 'lost') return [];
+  return state.listings
+    .filter(x => x.type === 'found' && x.status === 'active' && x.category === l.category && x.ownerId !== l.ownerId)
+    .sort((a, b) => Number(b.location === l.location) - Number(a.location === l.location))
+    .slice(0, 3);
 }
+
+function photo(item, cls = '') {
+  if (item.images?.length) return `<img class="photo ${cls}" src="${esc(imageUrl(item.images[0]))}" alt="${esc(item.title)}" loading="lazy">`;
+  const emoji = art[item.art] || categoryEmoji[item.category] || '📦';
+  return `<div class="photo art art-${esc(item.type)} ${cls}" role="img" aria-label="${item.demo ? 'Sample item illustration' : 'No photo uploaded'}"><span>${emoji}</span></div>`;
+}
+
+function go(next) {
+  const hash = '#/' + next;
+  if (location.hash === hash) { render(); window.scrollTo({ top: 0 }); }
+  else location.hash = hash;
+}
+function viewFromHash() {
+  const v = location.hash.replace(/^#\/?/, '') || 'home';
+  if (!VIEWS.includes(v)) return 'home';
+  if (v === 'admin' && state?.user.role !== 'admin') return 'home';
+  return v;
+}
+function resetFilters() { query = ''; category = ALL_CATEGORIES; place = ANYWHERE; sort = 'newest'; }
+
+/* ---------- Layout ---------- */
+function header() {
+  const unread = unreadCount();
+  const link = (v, label) => `<a href="#/${v}" data-nav class="nav-link ${view === v ? 'active' : ''}">${label}</a>`;
+  return `<header class="topbar">
+    <div class="topbar-inner">
+      <a class="logo" href="#/home" data-nav aria-label="VITFinds home"><span class="logo-mark" aria-hidden="true">V</span><span>VIT<em>Finds</em><b>.</b></span></a>
+      <nav class="main-nav" aria-label="Main">
+        ${link('all', 'Browse')}${link('lost', 'Lost')}${link('found', 'Found')}${link('sale', 'Marketplace')}
+        <a href="#/home" data-nav data-scroll="how" class="nav-link">How it works</a>
+        <div class="mobile-only nav-sep"></div>
+        <div class="mobile-only">${link('saved', 'Saved items')}${link('mine', 'My listings')}${link('messages', 'Messages')}${link('activity', 'Activity')}${state.user.role === 'admin' ? link('admin', 'Moderation') : ''}</div>
+      </nav>
+      <div class="top-actions">
+        <a href="#/messages" data-nav class="icon-btn desktop-only ${view === 'messages' ? 'active' : ''}" aria-label="Messages" title="Messages">${icon('chat')}</a>
+        <a href="#/activity" data-nav class="icon-btn ${view === 'activity' ? 'active' : ''}" aria-label="Activity, ${unread} unread" title="Activity">${icon('bell')}<span class="dot-badge" id="unread-badge" ${unread ? '' : 'hidden'}>${unread}</span></a>
+        <button class="btn btn-primary btn-sm post-btn" data-action="post">${icon('plus')}<span>Post item</span></button>
+        <div class="user-wrap">
+          <button class="avatar-btn" data-action="user-menu" aria-haspopup="menu" aria-expanded="false" aria-label="Account menu">${esc(initials(state.user.name))}</button>
+          <div class="user-menu" id="user-menu" role="menu" hidden>
+            <div class="user-menu-head"><strong>${esc(state.user.name)}</strong><small>${demo ? (state.user.id.startsWith('demo-') ? 'Demo account' : 'Local account') : 'Verified student'} · VIT Vellore</small></div>
+            <a role="menuitem" href="#/saved" data-nav>${icon('heart')} Saved items <span class="count">${state.saved.length}</span></a>
+            <a role="menuitem" href="#/mine" data-nav>${icon('box')} My listings</a>
+            <a role="menuitem" href="#/messages" data-nav>${icon('chat')} Messages <span class="count">${state.conversations.length}</span></a>
+            <a role="menuitem" href="#/activity" data-nav>${icon('bell')} Activity ${unread ? `<span class="count hot">${unread}</span>` : ''}</a>
+            ${state.user.role === 'admin' ? `<a role="menuitem" href="#/admin" data-nav>${icon('shield')} Moderation <span class="count">${openReports()}</span></a>` : ''}
+            <hr>
+            ${demo ? `<button role="menuitem" data-action="account">${icon('user')} Switch account</button>` : ''}
+            <button role="menuitem" data-action="logout">${icon('logout')} Sign out</button>
+          </div>
+        </div>
+        <button class="icon-btn menu-btn" data-action="menu" aria-label="Open menu" aria-expanded="false">${icon('menu')}</button>
+      </div>
+    </div>
+  </header>`;
+}
+
+function footer() {
+  return `<footer class="footer">
+    <div class="footer-inner">
+      <div class="footer-brand">
+        <a class="logo" href="#/home" data-nav><span class="logo-mark" aria-hidden="true">V</span><span>VIT<em>Finds</em><b>.</b></span></a>
+        <p>The campus lost & found and student marketplace for VIT Vellore. Made by students, for students.</p>
+      </div>
+      <div class="footer-cols">
+        <div><h4>Explore</h4><a href="#/lost" data-nav>Lost items</a><a href="#/found" data-nav>Found items</a><a href="#/sale" data-nav>Marketplace</a></div>
+        <div><h4>You</h4><a href="#/saved" data-nav>Saved</a><a href="#/mine" data-nav>My listings</a><a href="#/messages" data-nav>Messages</a></div>
+        <div><h4>Help</h4><a href="#/home" data-nav data-scroll="how">How it works</a><a href="#/home" data-nav data-scroll="faq">FAQs</a></div>
+      </div>
+    </div>
+    <div class="footer-base"><span>© ${new Date().getFullYear()} VITFinds</span><span>Meet in public campus spots. Never share ID numbers in a listing.</span></div>
+  </footer>`;
+}
+
+function render() {
+  if (!state) return;
+  const pages = { home, messages, activity, admin };
+  const content = (pages[view] || browse)();
+  $('#app').innerHTML = `${header()}<main class="page page-${view}" id="main">${content}</main>${footer()}`;
+  const chat = $('.chat-messages');
+  if (chat) chat.scrollTop = chat.scrollHeight;
+}
+
+/* ---------- Cards ---------- */
 function card(item) {
   const saved = state.saved.includes(item.id);
-  return `<article class="listing-card"><div class="card-visual"><button class="photo-button" data-action="detail" data-id="${item.id}" aria-label="View ${esc(item.title)}">${photo(item)}</button><span class="badge ${item.type}">${label(item)}</span><button class="save-button ${saved?'is-saved':''}" data-action="save" data-id="${item.id}" aria-label="${saved?'Unsave':'Save'} ${esc(item.title)}" aria-pressed="${saved}">${saved?'♥':'♡'}</button>${item.status !== 'active' ? `<span class="status-ribbon">${esc(item.status)}</span>` : ''}</div><div class="card-body"><div class="card-category">${esc(item.category)}<span>${ago(item.createdAt)}</span></div><button class="card-title" data-action="detail" data-id="${item.id}">${esc(item.title)}</button><p class="card-location">⌖ ${esc(item.location)}</p><div class="card-bottom">${item.type==='sale' ? `<strong class="price">${currency(item.price)}<small>${item.negotiable?'Negotiable':item.condition}</small></strong>` : `<span class="posted-by"><span class="mini-avatar">${esc(initials(userName(item.ownerId)))}</span>${esc(userName(item.ownerId))}</span>`}<button class="card-arrow" data-action="detail" data-id="${item.id}" aria-label="View listing">↗</button></div></div></article>`;
+  const footerPart = item.type === 'sale'
+    ? `<span class="price">${currency(item.price)}<small>${item.negotiable ? 'Open to offers' : esc(item.condition)}</small></span>`
+    : `<span class="by"><span class="mini-avatar">${esc(initials(userName(item.ownerId)))}</span>${esc(firstName(userName(item.ownerId)))}</span>`;
+  return `<article class="card card-${esc(item.type)} ${item.status !== 'active' ? 'is-closed' : ''}">
+    <div class="card-media">
+      <button class="media-btn" data-action="detail" data-id="${esc(item.id)}" aria-label="View ${esc(item.title)}">${photo(item)}</button>
+      <span class="badge badge-${esc(item.type)}">${typeLabel(item.type)}</span>
+      <button class="save-btn ${saved ? 'saved' : ''}" data-action="save" data-id="${esc(item.id)}" aria-pressed="${saved}" aria-label="${saved ? 'Remove from saved' : 'Save'} ${esc(item.title)}">${icon('heart')}</button>
+      ${item.status !== 'active' ? `<span class="ribbon">${esc(item.status)}</span>` : ''}
+    </div>
+    <div class="card-body">
+      <div class="tags"><span class="tag">${esc(item.category)}</span><span class="tag tag-plain">${icon('pin')}${esc(item.location)}</span></div>
+      <h3><button data-action="detail" data-id="${esc(item.id)}">${esc(item.title)}</button></h3>
+      <p class="card-when">${typeLabel(item.type)} · ${ago(item.createdAt)}</p>
+      <div class="card-foot">${footerPart}<button class="round-btn" data-action="detail" data-id="${esc(item.id)}" aria-label="Open ${esc(item.title)}">${icon('arrow')}</button></div>
+    </div>
+  </article>`;
 }
+
+function emptyState(title, text, withPost = true) {
+  return `<div class="empty"><div class="empty-art">${icon('search')}</div><h3>${title}</h3><p>${text}</p>${withPost ? `<button class="btn btn-primary" data-action="post">${icon('plus')} Post an item</button>` : ''}</div>`;
+}
+
+/* ---------- Home ---------- */
+function home() {
+  const active = state.listings.filter(l => l.status === 'active');
+  const stats = [
+    [active.filter(l => l.type === 'found').length, 'found items waiting for owners'],
+    [state.listings.filter(l => l.status === 'returned').length, 'items returned home'],
+    [active.filter(l => l.type === 'lost').length, 'students looking for something'],
+    [active.filter(l => l.type === 'sale').length, 'things for sale on campus']
+  ];
+  const myMatches = state.listings
+    .filter(l => l.type === 'lost' && l.ownerId === state.user.id && l.status === 'active')
+    .map(l => ({ l, found: matchesFor(l) }))
+    .filter(x => x.found.length);
+  const tabItems = state.listings
+    .filter(l => homeTab === 'all' || l.type === homeTab)
+    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+    .slice(0, 8);
+
+  return `
+  <section class="hero">
+    <div class="hero-copy">
+      <span class="pill"><span class="pulse"></span>${stats[0][0]} found ${stats[0][0] === 1 ? 'item is' : 'items are'} waiting at VIT Vellore</span>
+      <h1>Lost something on campus? <em>Let’s</em> get it <em>back.</em></h1>
+      <p class="lede">VITFinds connects the student who lost it with the student who found it. Search what’s been handed in, claim it privately, and sort the handover in chat.</p>
+      <form class="hero-search" id="hero-search" role="search">
+        <label class="hs-field">${icon('search')}<input name="q" type="search" placeholder="Try “black headphones” or “ID card”" aria-label="What are you looking for?"></label>
+        <select name="type" aria-label="Listing type"><option value="all">Everything</option><option value="found">Found items</option><option value="lost">Lost reports</option><option value="sale">For sale</option></select>
+        <button class="btn btn-primary">Search</button>
+      </form>
+      <div class="quick">
+        <span>Popular:</span>
+        ${['ID & essentials', 'Electronics', 'Books & stationery', 'Cycles & sports'].map(c => `<button class="chip" data-action="quick-category" data-id="${esc(c)}">${categoryEmoji[c]} ${esc(c)}</button>`).join('')}
+      </div>
+    </div>
+    <div class="hero-visual">${heroStack()}</div>
+  </section>
+
+  <section class="stats" aria-label="Campus numbers">
+    ${stats.map(([n, t]) => `<div class="stat"><strong>${n}</strong><span>${t}</span></div>`).join('')}
+  </section>
+
+  ${myMatches.length ? `<section class="section matches-band">
+    <div class="section-head"><div><p class="eyebrow">${icon('sparkle')} Just for you</p><h2>Possible <em>matches</em> for your lost items</h2></div></div>
+    <div class="match-list">${myMatches.map(({ l, found }) => `<div class="match-card">
+      <p class="match-for">You lost: <strong>${esc(l.title)}</strong></p>
+      ${found.map(f => `<button class="match-row" data-action="detail" data-id="${esc(f.id)}"><span class="match-thumb">${photo(f)}</span><span><strong>${esc(f.title)}</strong><small>${icon('pin')} ${esc(f.location)} · ${ago(f.createdAt)}</small></span>${icon('right')}</button>`).join('')}
+    </div>`).join('')}</div>
+    <p class="fine">Matched by category, with nearby places first. The finder still checks ownership before handing anything over.</p>
+  </section>` : ''}
+
+  <section class="section intents">
+    <button class="intent intent-lost" data-action="post" data-id="lost"><span class="intent-icon">${icon('lost')}</span><strong>I lost something</strong><span>Put the word out across campus in under a minute.</span><span class="intent-go">${icon('arrow')}</span></button>
+    <button class="intent intent-found" data-action="post" data-id="found"><span class="intent-icon">${icon('found')}</span><strong>I found something</strong><span>Post it, keep one detail secret, and make someone’s day.</span><span class="intent-go">${icon('arrow')}</span></button>
+    <button class="intent intent-sale" data-action="post" data-id="sale"><span class="intent-icon">${icon('sale')}</span><strong>I’m selling</strong><span>Books, cycles, lamps. Give them a second semester.</span><span class="intent-go">${icon('arrow')}</span></button>
+  </section>
+
+  <section class="section how" id="how">
+    <div class="section-head center"><p class="eyebrow">How it works</p><h2>Three steps from <em>“where is it?”</em> to <em>“got it!”</em></h2></div>
+    <div class="steps">
+      <article class="step">
+        <span class="step-no">01</span>
+        <h3>Post it in a minute</h3>
+        <p>Add a title, photo, category, and the campus spot. Finders keep one identifying detail to themselves.</p>
+        <div class="mock mock-form">
+          <div class="mock-row"><span class="mock-label">Item</span><span class="mock-input">Blue water bottle</span></div>
+          <div class="mock-row two"><span class="mock-input">${icon('tag')} Hostel essentials</span><span class="mock-input">${icon('pin')} SJT</span></div>
+          <span class="mock-btn">Publish listing</span>
+        </div>
+      </article>
+      <article class="step">
+        <span class="step-no">02</span>
+        <h3>Search, filter, match</h3>
+        <p>Filter by category and location. When you report something lost, we point you to found items that look like it.</p>
+        <div class="mock mock-filters">
+          <span class="mock-chip on">Found</span><span class="mock-chip">Electronics</span><span class="mock-chip">Main Library</span>
+          <div class="mock-result"><span class="mock-dot"></span><span><b>Possible match</b><small>Black headphones · Main Library</small></span></div>
+        </div>
+        <button class="btn btn-ghost btn-sm" data-action="goto" data-id="found">Start searching ${icon('arrow')}</button>
+      </article>
+      <article class="step">
+        <span class="step-no">03</span>
+        <h3>Claim privately, meet safely</h3>
+        <p>Describe a detail only the owner would know. The finder reviews it, you chat in-app, and meet at a public spot.</p>
+        <div class="mock mock-chat">
+          <span class="bubble in">It has a sticker of a cat on the left cup 🐱</span>
+          <span class="bubble out">That’s it! Foodys at 5?</span>
+          <span class="mock-status">${icon('check')} Claim accepted · Returned</span>
+        </div>
+      </article>
+    </div>
+  </section>
+
+  <section class="section fresh">
+    <div class="section-head">
+      <div><p class="eyebrow">Fresh on campus</p><h2>Recently <em>posted</em></h2></div>
+      <div class="tabs" role="tablist">
+        ${[['found', 'Found'], ['lost', 'Lost'], ['sale', 'For sale'], ['all', 'All']].map(([k, t]) => `<button role="tab" aria-selected="${homeTab === k}" class="tab ${homeTab === k ? 'on' : ''}" data-action="home-tab" data-id="${k}">${t}</button>`).join('')}
+      </div>
+    </div>
+    <div class="grid">${tabItems.length ? tabItems.map(card).join('') : emptyState('Nothing here yet', 'Be the first to post in this section.')}</div>
+    <div class="center-row"><a class="btn btn-outline" href="#/${homeTab}" data-nav>See everything ${icon('arrow')}</a></div>
+  </section>
+
+  <section class="section faq" id="faq">
+    <div class="faq-intro"><p class="eyebrow">FAQs</p><h2>Good <em>questions.</em></h2><p>Everything you need to know before you post, claim, or buy.</p></div>
+    <div class="faq-list">${faqs().map(([q, a], i) => `<details ${i === 0 ? 'open' : ''}><summary>${q}<span class="plus" aria-hidden="true"></span></summary><p>${a}</p></details>`).join('')}</div>
+  </section>
+
+  <section class="cta-band">
+    <h2>Lost it? <em>Find</em> it.<br>Found it? <em>Return</em> it.</h2>
+    <div class="cta-actions"><a class="btn btn-light" href="#/found" data-nav>${icon('search')} Start searching</a><button class="btn btn-outline-light" data-action="post">${icon('plus')} Post an item</button></div>
+  </section>`;
+}
+
+function heroItems() {
+  return state.listings
+    .filter(l => l.status === 'active')
+    .sort((a, b) => (a.type === 'found' ? -1 : 0) - (b.type === 'found' ? -1 : 0) || new Date(b.createdAt) - new Date(a.createdAt))
+    .slice(0, 5);
+}
+
+function heroStack() {
+  const items = heroItems();
+  if (!items.length) {
+    return `<div class="stack"><div class="stack-card pos-0 placeholder"><div class="photo art art-found"><span>🔎</span></div><div class="stack-body"><span class="badge badge-found">Found</span><h3>The first find shows up here</h3><p>Post something you found and it will appear on this board.</p></div></div></div>`;
+  }
+  heroIndex = ((heroIndex % items.length) + items.length) % items.length;
+  const ordered = items.map((_, i) => items[(heroIndex + i) % items.length]).slice(0, 3);
+  return `<div class="stack" aria-roledescription="carousel" aria-label="Latest on campus">
+    ${ordered.map((item, i) => `<article class="stack-card pos-${i}" ${i ? 'aria-hidden="true"' : ''}>
+      <button class="stack-media" data-action="detail" data-id="${esc(item.id)}" ${i ? 'tabindex="-1"' : ''} aria-label="View ${esc(item.title)}">${photo(item)}</button>
+      <div class="stack-body">
+        <div class="tags"><span class="badge badge-${esc(item.type)}">${typeLabel(item.type)}</span><span class="tag">${esc(item.category)}</span></div>
+        <h3>${esc(item.title)}</h3>
+        <p>${icon('pin')} ${placeVerb(item.type)} ${esc(item.location)} · ${ago(item.createdAt)}</p>
+      </div>
+    </article>`).reverse().join('')}
+    <div class="stack-nav">
+      <button class="round-btn" data-action="hero-prev" aria-label="Previous item">${icon('left')}</button>
+      <span class="dots">${items.map((_, i) => `<span class="${i === heroIndex ? 'on' : ''}"></span>`).join('')}</span>
+      <button class="round-btn" data-action="hero-next" aria-label="Next item">${icon('right')}</button>
+    </div>
+  </div>`;
+}
+
+function faqs() {
+  return [
+    ['Who can use VITFinds?', 'Any VIT student with an approved university email address. Everyone you talk to here is part of the campus community.'],
+    ['How do I claim something someone found?', 'Open the listing and choose <b>This is mine</b>. Describe a private detail, a mark, or what’s inside. Only the finder sees your claim, and they confirm once it has been handed back.'],
+    ['I found something. What should I post?', 'A clear title, a photo, where and when you found it. Keep one identifying detail (a sticker, a wallpaper, the contents) out of the post so you can check claims.'],
+    ['Is my phone number shared?', 'No. Conversations stay inside VITFinds. Agree on a public spot like Foodys, the library, or the main gate to hand things over.'],
+    ['Can I sell things too?', 'Yes. Marketplace listings have a price, condition, and an “open to offers” option. You can mark an item reserved or sold when it’s gone.'],
+    ['How do “possible matches” work?', 'When you report something lost, VITFinds shows found items in the same category, with nearby places first. It’s a helpful nudge, not image recognition.'],
+    ['What if a listing looks wrong?', 'Use <b>Report this listing</b>. Campus moderators review reports and remove anything that breaks the rules.']
+  ];
+}
+
+/* ---------- Browse ---------- */
 function filtered() {
-  return state.listings.filter(l => (['all','saved','mine'].includes(view) || l.type===view) && (view!=='saved'||state.saved.includes(l.id)) && (view!=='mine'||l.ownerId===state.user.id) && (category==='All categories'||l.category===category) && (location==='Anywhere on campus'||l.location===location) && `${l.title} ${l.description} ${l.category} ${l.location}`.toLowerCase().includes(query.toLowerCase())).sort((a,b)=>sort==='price-low'?a.price-b.price:sort==='price-high'?b.price-a.price:new Date(b.createdAt)-new Date(a.createdAt));
+  const q = query.trim().toLowerCase();
+  return state.listings
+    .filter(l =>
+      (['all', 'saved', 'mine'].includes(view) || l.type === view) &&
+      (view !== 'saved' || state.saved.includes(l.id)) &&
+      (view !== 'mine' || l.ownerId === state.user.id) &&
+      (category === ALL_CATEGORIES || l.category === category) &&
+      (place === ANYWHERE || l.location === place) &&
+      `${l.title} ${l.description} ${l.category} ${l.location}`.toLowerCase().includes(q))
+    .sort((a, b) => sort === 'price-low' ? a.price - b.price : sort === 'price-high' ? b.price - a.price : new Date(b.createdAt) - new Date(a.createdAt));
 }
-function feed() {
-  const titles = {all:['A little lost. A lot to find.','Lost something? Found something? Or ready to pass it on?'],lost:['Let’s bring it back.','Put the word out. Your campus is here to help.'],found:['Someone’s looking for that.','Help a lost thing find its way home.'],sale:['Good things. New beginnings.','Buy, sell, and give things a second chapter on campus.'],saved:['Worth coming back to.','The items you’ve kept an eye on, all in one place.'],mine:['Your corner of campus.','Manage your posts and help complete the connection.']};
-  const [title, sub] = titles[view];
-  return `<section class="page-heading"><div><h1>${title}</h1><p class="subtitle">${sub}</p></div><button class="primary" data-action="post"><span>＋</span> Post an item</button></section>${view==='all'?`<section class="feature-strip"><button class="feature-tile green" data-action="nav" data-id="lost"><span class="feature-icon">⌕</span><div><strong>Lost it?</strong><p>Let’s find it together.</p></div><span class="feature-arrow">↗</span></button><button class="feature-tile blue" data-action="nav" data-id="found"><span class="feature-icon">◎</span><div><strong>Found it?</strong><p>Make someone’s day.</p></div><span class="feature-arrow">↗</span></button><button class="feature-tile yellow" data-action="nav" data-id="sale"><span class="feature-icon">♲</span><div><strong>Pass it on.</strong><p>Less clutter. More possibilities.</p></div><span class="feature-arrow">↗</span></button></section>`:''}<section class="browse"><div class="browse-heading"><h2>${view==='all'?'Around campus':view==='mine'?'Your listings':view==='saved'?'Your saved items':'Latest listings'} <span id="result-count">${filtered().length}</span></h2><label class="sort-label">Sort by <select id="sort" aria-label="Sort listings"><option value="newest" ${sort==='newest'?'selected':''}>Newest first</option><option value="price-low" ${sort==='price-low'?'selected':''}>Price: low to high</option><option value="price-high" ${sort==='price-high'?'selected':''}>Price: high to low</option></select></label></div><div class="filters"><label class="search-field"><span>⌕</span><input id="search" type="search" placeholder="Search for a book, bottle, backpack…" aria-label="Search listings" value="${esc(query)}"></label><select id="category" aria-label="Filter category">${['All categories',...categories].map(x=>`<option ${category===x?'selected':''}>${esc(x)}</option>`).join('')}</select><select id="location" aria-label="Filter location">${['Anywhere on campus',...locations].map(x=>`<option ${location===x?'selected':''}>${esc(x)}</option>`).join('')}</select></div><div class="feed-meta"><button class="text-button" data-action="reset-filters">Reset filters</button></div><div class="listing-grid" id="listing-grid">${results()}</div></section>`;
+
+function results() {
+  const rows = filtered();
+  if (rows.length) return rows.map(card).join('');
+  if (view === 'saved') return emptyState('No saved items yet', 'Tap the heart on any listing to keep an eye on it.', false);
+  if (view === 'mine') return emptyState('You haven’t posted yet', 'Lost something, found something, or have something to sell?');
+  return emptyState('No items match', 'Try a different search or filter, or be the first to post.');
 }
-function results() { const rows = filtered(); return rows.length ? rows.map(card).join('') : `<div class="empty"><span>⌕</span><h2>No items here yet</h2><p>Try a different search, or be the first to post.</p><button class="primary" data-action="post">Post an item</button></div>`; }
-function activity() { return `<section class="page-heading"><div><p class="eyebrow">STAY IN THE LOOP</p><h1>Your activity.</h1><p class="subtitle">Messages, claims, and updates from your campus.</p></div><button class="secondary" data-action="read">Mark all read</button></section><div class="activity-list">${state.notifications.slice().reverse().map(n=>`<article class="activity-row ${n.read?'':'unread'}"><span class="activity-icon">${n.read?'✓':'!'}</span><div><p>${esc(n.message)}</p><small>${new Date(n.createdAt).toLocaleString()}</small></div></article>`).join('') || '<div class="empty"><h2>You’re all caught up</h2><p>Updates about your listings will appear here.</p></div>'}</div>`; }
+
+function browse() {
+  const heads = {
+    all: ['Browse campus', 'Everything <em>around</em> campus', 'Lost reports, found items, and student sales in one place.'],
+    lost: ['Lost items', 'Help bring it <em>back.</em>', 'Students are looking for these. Seen one? Send them a message.'],
+    found: ['Found items', 'Someone’s <em>looking</em> for these.', 'Recognise something? Claim it with a detail only you would know.'],
+    sale: ['Marketplace', 'Good things, <em>second</em> semester.', 'Buy and sell with students on campus. No delivery fees, no strangers.'],
+    saved: ['Saved items', 'Worth coming <em>back</em> to.', 'The listings you’re keeping an eye on.'],
+    mine: ['My listings', 'Your corner of <em>campus.</em>', 'Edit posts, update their status, and review claims.']
+  };
+  const [eyebrow, title, sub] = heads[view];
+  const typeTabs = ['all', 'lost', 'found', 'sale'].includes(view)
+    ? `<div class="tabs" role="tablist">${[['all', 'All'], ['lost', 'Lost'], ['found', 'Found'], ['sale', 'For sale']].map(([k, t]) => `<a role="tab" aria-selected="${view === k}" class="tab ${view === k ? 'on' : ''}" href="#/${k}" data-keep>${t}</a>`).join('')}</div>`
+    : '';
+  const count = filtered().length;
+  return `<section class="page-head">
+      <div><p class="eyebrow">${eyebrow}</p><h1>${title}</h1><p class="lede">${sub}</p></div>
+      <button class="btn btn-primary" data-action="post" data-id="${['lost', 'found', 'sale'].includes(view) ? view : ''}">${icon('plus')} Post an item</button>
+    </section>
+    <section class="toolbar">
+      ${typeTabs}
+      <div class="filters">
+        <label class="search">${icon('search')}<input id="search" type="search" placeholder="Search a book, bottle, backpack…" aria-label="Search listings" value="${esc(query)}"></label>
+        <select id="category" aria-label="Category">${[ALL_CATEGORIES, ...categories].map(x => `<option ${category === x ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select>
+        <select id="location" aria-label="Location">${[ANYWHERE, ...locations].map(x => `<option ${place === x ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select>
+        <select id="sort" aria-label="Sort"><option value="newest" ${sort === 'newest' ? 'selected' : ''}>Newest first</option><option value="price-low" ${sort === 'price-low' ? 'selected' : ''}>Price: low to high</option><option value="price-high" ${sort === 'price-high' ? 'selected' : ''}>Price: high to low</option></select>
+      </div>
+    </section>
+    <div class="result-line"><span><strong id="result-count">${count}</strong> ${count === 1 ? 'item' : 'items'}</span><button class="link-btn" data-action="reset-filters">Reset filters</button></div>
+    <div class="grid" id="listing-grid">${results()}</div>`;
+}
+
+function updateResults() {
+  $('#listing-grid').innerHTML = results();
+  const n = filtered().length;
+  $('.result-line span').innerHTML = `<strong id="result-count">${n}</strong> ${n === 1 ? 'item' : 'items'}`;
+}
+
+/* ---------- Messages / Activity / Admin ---------- */
 function messages() {
-  if (!conversationId && state.conversations.length) conversationId=state.conversations[0].id;
-  const c = state.conversations.find(x=>x.id===conversationId);
-  const l = c && state.listings.find(x=>x.id===c.listingId);
-  return `<section class="page-heading"><div><p class="eyebrow">MAKE THE CONNECTION</p><h1>Campus conversations.</h1><p class="subtitle">Keep your number private. Work out the details here.</p></div></section><div class="inbox"><div class="threads"><h2>Messages <span>${state.conversations.length}</span></h2>${state.conversations.map(x=>`<button class="thread ${x.id===conversationId?'active':''}" data-action="conversation" data-id="${x.id}"><span class="avatar">${esc(initials(userName(x.members.find(id=>id!==state.user.id))))}</span><span><strong>${esc(userName(x.members.find(id=>id!==state.user.id)))}</strong><small>${esc(state.listings.find(l=>l.id===x.listingId)?.title || 'Unavailable listing')}</small></span></button>`).join('') || '<p class="muted inset">Start a conversation from a listing.</p>'}</div><div class="chat">${c ? `<div class="chat-header"><strong>${esc(l?.title || 'Unavailable listing')}</strong><small>Arrange a handover in a public campus location.</small></div><div class="chat-messages">${state.messages.filter(m=>m.conversationId===c.id).map(m=>`<div class="message ${m.senderId===state.user.id?'outgoing':''}"><p>${esc(m.text)}</p><small>${new Date(m.createdAt).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}</small></div>`).join('')}</div><form id="message-form" class="chat-compose"><input name="text" required maxlength="2000" aria-label="Message" placeholder="Write a message…"><button class="primary">Send ↗</button></form>` : '<div class="empty"><span>☏</span><h2>A conversation starts here</h2><p>Contact a student from a listing to buy, return, or find an item.</p></div>'}</div></div>`;
+  if (!state.conversations.some(c => c.id === conversationId)) conversationId = state.conversations[0]?.id || null;
+  const c = state.conversations.find(x => x.id === conversationId);
+  const l = c && state.listings.find(x => x.id === c.listingId);
+  const other = conv => userName(conv.members.find(id => id !== state.user.id));
+  const lastMsg = conv => state.messages.filter(m => m.conversationId === conv.id).at(-1);
+  return `<section class="page-head"><div><p class="eyebrow">Messages</p><h1>Campus <em>conversations.</em></h1><p class="lede">Your number stays private. Sort out the details here.</p></div></section>
+  <div class="inbox ${c && showThread ? 'has-open' : ''}">
+    <aside class="threads">
+      <h2>Inbox <span>${state.conversations.length}</span></h2>
+      ${state.conversations.map(x => `<button class="thread ${x.id === conversationId ? 'on' : ''}" data-action="conversation" data-id="${esc(x.id)}">
+        <span class="avatar">${esc(initials(other(x)))}</span>
+        <span class="thread-copy"><strong>${esc(other(x))}</strong><small>${esc(state.listings.find(li => li.id === x.listingId)?.title || 'Unavailable listing')}</small><em>${esc(lastMsg(x)?.text || '')}</em></span>
+      </button>`).join('') || '<p class="muted pad">Start a conversation from any listing.</p>'}
+    </aside>
+    <section class="chat">
+      ${c ? `<div class="chat-head">
+          <button class="icon-btn back-btn" data-action="conversation" data-id="" aria-label="Back to inbox">${icon('left')}</button>
+          <span class="avatar">${esc(initials(other(c)))}</span>
+          <div><strong>${esc(other(c))}</strong><small>${l ? `<button class="link-btn" data-action="detail" data-id="${esc(l.id)}">${esc(l.title)}</button>` : 'Unavailable listing'}</small></div>
+        </div>
+        <div class="chat-messages">
+          <p class="chat-tip">${icon('shield')} Meet in a public campus spot. Never share passwords or ID numbers.</p>
+          ${state.messages.filter(m => m.conversationId === c.id).map(m => `<div class="msg ${m.senderId === state.user.id ? 'out' : 'in'}"><p>${esc(m.text)}</p><small>${new Date(m.createdAt).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</small></div>`).join('')}
+        </div>
+        <form id="message-form" class="chat-compose"><input name="text" required maxlength="2000" autocomplete="off" aria-label="Message" placeholder="Write a message…"><button class="btn btn-primary">Send</button></form>`
+      : `<div class="empty"><div class="empty-art">${icon('chat')}</div><h3>A conversation starts here</h3><p>Contact a student from a listing to return, find, or buy an item.</p><a class="btn btn-outline" href="#/all" data-nav>Browse listings</a></div>`}
+    </section>
+  </div>`;
 }
-function admin() { return `<section class="page-heading"><div><p class="eyebrow">CAMPUS MODERATION</p><h1>Keep the community helpful.</h1><p class="subtitle">Review student reports and remove inappropriate listings.</p></div></section><div class="activity-list">${state.reports.filter(r=>r.status==='open').map(r=>`<article class="report-row"><div><h3>${esc(state.listings.find(l=>l.id===r.listingId)?.title || 'Unavailable listing')}</h3><p>${esc(r.reason)}</p><small>Reported by ${esc(userName(r.userId))}</small></div><div class="button-row"><button class="secondary" data-action="moderate" data-id="${r.id}" data-value="dismiss">Dismiss</button><button class="danger" data-action="moderate" data-id="${r.id}" data-value="remove">Remove listing</button></div></article>`).join('') || '<div class="empty"><h2>No open reports</h2><p>New reports will appear here for review.</p></div>'}</div>`; }
-function render() { $('#app').innerHTML = shell(view==='messages'?messages():view==='activity'?activity():view==='admin'?admin():feed()); }
-function showModal(html) { const d=$('#modal'); d.innerHTML=`<button class="close-modal" data-action="close" aria-label="Close dialog">×</button>${html}`; for(const img of d.querySelectorAll('.extra-images img')) { const path=new URL(img.src,window.location.origin).pathname; img.src=(config.imageBaseUrl||'')+path; } const status=d.querySelector('#status-form'); if(status)status.insertAdjacentHTML('afterend',`<div class="button-row"><button class="secondary" data-action="edit-listing" data-id="${esc(status.dataset.id)}">Edit listing</button><button class="text-button" data-action="archive-listing" data-id="${esc(status.dataset.id)}">Remove my listing</button></div>`); const heading=d.querySelector('h2'); if(heading){heading.id='dialog-title';d.setAttribute('aria-labelledby','dialog-title');} if(!d.open)d.showModal(); }
+
+function activity() {
+  const list = state.notifications.slice().reverse();
+  return `<section class="page-head"><div><p class="eyebrow">Activity</p><h1>Stay in the <em>loop.</em></h1><p class="lede">Messages, claims, and updates about your listings.</p></div>${unreadCount() ? `<button class="btn btn-outline" data-action="read">${icon('check')} Mark all read</button>` : ''}</section>
+  <div class="feed-list">${list.map(n => `<article class="note ${n.read ? '' : 'unread'}"><span class="note-icon">${icon(n.read ? 'check' : 'bell')}</span><div><p>${esc(n.message)}</p><small>${ago(n.createdAt)}</small></div></article>`).join('') || emptyState('You’re all caught up', 'Updates about your listings and claims will show up here.', false)}</div>`;
+}
+
+function admin() {
+  const open = state.reports.filter(r => r.status === 'open');
+  return `<section class="page-head"><div><p class="eyebrow">Moderation</p><h1>Keep campus <em>helpful.</em></h1><p class="lede">Review reports from students and remove listings that break the rules.</p></div></section>
+  <div class="feed-list">${open.map(r => {
+    const l = state.listings.find(x => x.id === r.listingId);
+    return `<article class="report">
+      <div><h3>${l ? `<button class="link-btn" data-action="detail" data-id="${esc(l.id)}">${esc(l.title)}</button>` : 'Unavailable listing'}</h3><p>${esc(r.reason)}</p><small>Reported by ${esc(userName(r.userId))} · ${ago(r.createdAt)}</small></div>
+      <div class="btn-row"><button class="btn btn-outline btn-sm" data-action="moderate" data-id="${esc(r.id)}" data-value="dismiss">Dismiss</button><button class="btn btn-danger btn-sm" data-action="moderate" data-id="${esc(r.id)}" data-value="remove">Remove listing</button></div>
+    </article>`;
+  }).join('') || emptyState('No open reports', 'New reports from students will appear here.', false)}</div>`;
+}
+
+/* ---------- Dialogs ---------- */
+function showModal(html, cls = '') {
+  const d = $('#modal');
+  d.className = cls;
+  d.innerHTML = `<button class="close-modal" data-action="close" aria-label="Close dialog">${icon('close')}</button>${html}`;
+  const heading = d.querySelector('h2');
+  if (heading) { heading.id = 'dialog-title'; d.setAttribute('aria-labelledby', 'dialog-title'); }
+  if (!d.open) d.showModal();
+}
+
 function detail(id) {
-  const l=state.listings.find(x=>x.id===id); if(!l)return toast('This listing is unavailable.');
-  const isOwner=l.ownerId===state.user.id;
-  const claims=state.claims.filter(c=>c.listingId===l.id);
-  const matches = l.type==='lost' ? state.listings.filter(x=>x.type==='found' && x.status==='active' && x.category===l.category).sort((a,b)=>Number(b.location===l.location)-Number(a.location===l.location)).slice(0,3) : [];
-  showModal(`<div class="detail-visual">${photo(l)}<span class="badge ${l.type}">${label(l)}</span></div><div class="dialog-content"><p class="eyebrow">${esc(l.category)} · ${esc(l.status)}</p><h2>${esc(l.title)}</h2>${l.type==='sale'?`<p class="detail-price">${currency(l.price)} <small>${l.condition}${l.negotiable?' · Negotiable':''}</small></p>`:''}<div class="detail-meta"><span>⌖ ${esc(l.location)}</span><span>◷ ${esc(l.date)}</span></div><p class="description">${esc(l.description)}</p>${l.images?.length>1?`<div class="extra-images">${l.images.slice(1).map(x=>`<img src="${esc((config.apiUrl||'')+x)}" alt="Additional photo of ${esc(l.title)}">`).join('')}</div>`:''}<div class="owner-row"><span class="avatar">${esc(initials(userName(l.ownerId)))}</span><div><strong>${esc(userName(l.ownerId))}</strong><small>${l.demo?'Sample student':state.users.find(u=>u.id===l.ownerId)?.verified?'Verified student':'Student'}</small></div></div>${isOwner?`<form id="status-form" data-id="${l.id}" class="status-form"><label>Listing status<select name="status">${(l.type==='sale'?['active','reserved','sold']:['active','returned']).map(x=>`<option ${l.status===x?'selected':''}>${x}</option>`).join('')}</select></label><button class="primary">Update status</button></form>`:l.status==='active'?`<div class="button-row"><button class="primary grow" data-action="contact" data-id="${l.id}">${l.type==='sale'?'Message seller / make offer':'Contact student'} ↗</button>${l.type==='found'?`<button class="secondary" data-action="claim" data-id="${l.id}">Claim item</button>`:''}</div>`:'<p class="info-box">This listing is no longer open for new requests.</p>'}${claims.length?`<h3>Ownership claims</h3>${claims.map(c=>`<div class="claim-box"><strong>${esc(userName(c.userId))} · ${esc(c.status)}</strong><p>${esc(c.proof)}</p>${isOwner&&c.status==='pending'&&l.status==='active'?`<div class="button-row"><button class="primary" data-action="claim-review" data-id="${c.id}" data-value="accepted">Confirm returned</button><button class="secondary" data-action="claim-review" data-id="${c.id}" data-value="rejected">Decline</button></div>`:''}</div>`).join('')}`:''}${matches.length?`<h3>Possible matches</h3><p class="muted">Based on category, with nearby items shown first. Ownership still needs to be verified.</p>${matches.map(x=>`<button class="match-row" data-action="detail" data-id="${x.id}">${esc(x.title)}<span>${esc(x.location)} ↗</span></button>`).join('')}`:''}${!isOwner?`<button class="text-button report-link" data-action="report" data-id="${l.id}">⚑ Report this listing</button>`:''}</div>`);
+  const l = state.listings.find(x => x.id === id);
+  if (!l) return toast('This listing is no longer available.');
+  const isOwner = l.ownerId === state.user.id;
+  const claims = state.claims.filter(c => c.listingId === l.id);
+  const matches = matchesFor(l);
+  const owner = state.users.find(u => u.id === l.ownerId);
+  const myPendingClaim = claims.some(c => c.userId === state.user.id && c.status === 'pending');
+
+  let actions = '';
+  if (isOwner) {
+    actions = `<form id="status-form" data-id="${esc(l.id)}" class="status-form">
+        <label>Listing status<select name="status">${(l.type === 'sale' ? ['active', 'reserved', 'sold'] : ['active', 'returned']).map(x => `<option value="${x}" ${l.status === x ? 'selected' : ''}>${x[0].toUpperCase() + x.slice(1)}</option>`).join('')}</select></label>
+        <button class="btn btn-primary">Update</button>
+      </form>
+      <div class="btn-row"><button class="btn btn-outline btn-sm" data-action="edit-listing" data-id="${esc(l.id)}">Edit listing</button><button class="link-btn danger-text" data-action="archive-listing" data-id="${esc(l.id)}">Remove my listing</button></div>`;
+  } else if (l.status === 'active') {
+    actions = `<div class="btn-row">
+        <button class="btn btn-primary grow" data-action="contact" data-id="${esc(l.id)}">${icon('chat')} ${l.type === 'sale' ? 'Message seller / make offer' : l.type === 'lost' ? 'I’ve seen this' : 'Message finder'}</button>
+        ${l.type === 'found' ? `<button class="btn btn-accent" data-action="claim" data-id="${esc(l.id)}" ${myPendingClaim ? 'disabled' : ''}>${icon('check')} ${myPendingClaim ? 'Claim pending' : 'This is mine'}</button>` : ''}
+      </div>`;
+  } else {
+    actions = `<p class="info-box">${icon('lock')} This listing is ${esc(l.status)} and no longer open for new requests.</p>`;
+  }
+
+  showModal(`<div class="detail">
+    <div class="detail-media">
+      <div class="detail-main">${photo(l)}<span class="badge badge-${esc(l.type)}">${typeLabel(l.type)}</span></div>
+      ${l.images?.length > 1 ? `<div class="thumbs">${l.images.map((src, i) => `<button class="${i === 0 ? 'on' : ''}" data-action="thumb" data-value="${esc(imageUrl(src))}" aria-label="Show photo ${i + 1}"><img src="${esc(imageUrl(src))}" alt=""></button>`).join('')}</div>` : ''}
+    </div>
+    <div class="detail-body">
+      <p class="eyebrow">${esc(l.category)} · <span class="status status-${esc(l.status)}">${esc(l.status)}</span></p>
+      <h2>${esc(l.title)}</h2>
+      ${l.type === 'sale' ? `<p class="detail-price">${currency(l.price)} <small>${esc(l.condition)}${l.negotiable ? ' · Open to offers' : ''}</small></p>` : ''}
+      <div class="meta-row"><span>${icon('pin')} ${placeVerb(l.type)} ${esc(l.location)}</span><span>${icon('calendar')} ${niceDate(l.date)}</span><span>${icon('clock')} Posted ${ago(l.createdAt)}</span></div>
+      <p class="description">${esc(l.description)}</p>
+      <div class="owner"><span class="avatar">${esc(initials(userName(l.ownerId)))}</span><div><strong>${esc(userName(l.ownerId))}${isOwner ? ' (you)' : ''}</strong><small>${l.demo ? 'Sample student' : owner?.verified ? `${icon('shield')} Verified student` : 'Student'}</small></div></div>
+      ${actions}
+      ${claims.length ? `<h3 class="sub">Ownership claims</h3>${claims.map(c => `<div class="claim"><div class="claim-top"><strong>${esc(userName(c.userId))}</strong><span class="status status-${esc(c.status)}">${esc(c.status)}</span></div><p>${esc(c.proof)}</p>${isOwner && c.status === 'pending' && l.status === 'active' ? `<div class="btn-row"><button class="btn btn-primary btn-sm" data-action="claim-review" data-id="${esc(c.id)}" data-value="accepted">${icon('check')} Confirm returned</button><button class="btn btn-outline btn-sm" data-action="claim-review" data-id="${esc(c.id)}" data-value="rejected">Decline</button></div>` : ''}</div>`).join('')}` : ''}
+      ${matches.length ? `<h3 class="sub">${icon('sparkle')} Possible matches</h3><p class="fine">Same category, nearby places first. Ownership still needs to be checked.</p>${matches.map(x => `<button class="match-row" data-action="detail" data-id="${esc(x.id)}"><span class="match-thumb">${photo(x)}</span><span><strong>${esc(x.title)}</strong><small>${icon('pin')} ${esc(x.location)}</small></span>${icon('right')}</button>`).join('')}` : ''}
+      ${!isOwner ? `<button class="link-btn report-link" data-action="report" data-id="${esc(l.id)}">${icon('flag')} Report this listing</button>` : ''}
+    </div>
+  </div>`, 'wide');
 }
-function post() { showModal(`<div class="dialog-content"><p class="eyebrow">A SMALL POST. A NEW CONNECTION.</p><h2>What brings you here?</h2><form id="post-form"><div class="type-options">${[['lost','⌕','I lost something'],['found','◎','I found something'],['sale','↗','I’m selling']].map(([v,i,t])=>`<label><input type="radio" name="type" value="${v}" ${(view===v || !['lost','found','sale'].includes(view)&&v==='found')?'checked':''}><span><b>${i}</b>${t}</span></label>`).join('')}</div><label>Item title<input name="title" required minlength="5" maxlength="100" placeholder="e.g. Black headphones found in the library"></label><div class="form-columns"><label>Category<select name="category">${categories.map(x=>`<option>${esc(x)}</option>`).join('')}</select></label><label>Campus location<select name="location">${locations.map(x=>`<option>${esc(x)}</option>`).join('')}</select></label></div><label>Description<textarea name="description" required minlength="15" maxlength="2000" rows="4" placeholder="Share helpful details. For found items, keep a unique identifying detail private."></textarea></label><div class="form-columns"><label>Date<input name="date" type="date" required max="${new Date().toISOString().slice(0,10)}" value="${new Date().toISOString().slice(0,10)}"></label><label>Photos (up to 3)<input name="photos" type="file" accept="image/jpeg,image/png,image/webp" multiple><small>JPEG, PNG or WebP. Up to 3 MB each.</small></label></div><div id="sale-fields" class="form-columns"><label>Price (₹)<input name="price" type="number" min="0" max="1000000" step="1" value="0"></label><label>Condition<select name="condition"><option>Good</option><option>New</option><option>Like new</option><option>Fair</option></select></label><label class="check-label"><input name="negotiable" type="checkbox" checked> Open to offers</label></div><p class="form-error" role="alert"></p><button class="primary full-width">Publish listing ↗</button><p class="form-note">Post only items allowed on campus. Never publish ID numbers or personal contact details.</p></form></div>`); updateSaleFields(); }
-function updateSaleFields(){ const el=$('#sale-fields'); if(el)el.hidden=$('#post-form input[name="type"]:checked').value!=='sale'; }
-function inputDialog(kind,id) { const data={contact:['Start a conversation','message','Introduce yourself, ask a question, or make an offer.','Send message',1],claim:['Is this yours?','proof','Describe a private detail, mark, or contents that prove the item is yours. Only the finder can see this.','Submit claim',15],report:['Report this listing','reason','Tell our moderators what’s wrong with this listing.','Submit report',10]}[kind];showModal(`<div class="dialog-content"><p class="eyebrow">VITFINDS COMMUNITY</p><h2>${data[0]}</h2><form id="action-form" data-kind="${kind}" data-id="${id}"><label>${data[2]}<textarea name="${data[1]}" rows="5" minlength="${data[4]}" maxlength="1000" required></textarea></label><p class="form-error" role="alert"></p><button class="primary full-width">${data[3]} ↗</button></form></div>`); }
-function account() { showModal(`<div class="dialog-content"><p class="eyebrow">YOUR CAMPUS ACCOUNT</p><h2>${esc(state.user.name)}</h2>${demo?`<p class="muted">These are local sample accounts. Switch students to try messages, claims, and moderation.</p><div class="account-options">${[['demo-me','Alex Student','Has a lost backpack and a lamp for sale'],['demo-priya','Priya S.','Found headphones; selling a bicycle'],['demo-arjun','Arjun R.','Found keys; selling a textbook'],['demo-admin','Campus moderator','Review reported listings']].map(([id,name,desc])=>`<button data-action="demo-account" data-id="${id}"><span class="avatar">${initials(name)}</span><span><strong>${name}</strong><small>${desc}</small></span><span>↗</span></button>`).join('')}</div>`:'<p>Your university email has been verified through Amazon Cognito.</p>'}<button class="secondary full-width" data-action="logout">Sign out</button></div>`); }
-function campusPicker() { showModal(`<div class="dialog-content"><p class="eyebrow">YOUR VIT CAMPUS</p><h2>VIT Vellore</h2><p class="muted">Your feed currently belongs to the Vellore campus. Support for VIT Chennai, VIT-AP, and VIT Bhopal is coming later.</p><button class="primary full-width" data-action="close">Continue with Vellore</button></div>`); }
-function auth(mode='login') { const localMode=demo&&['login','signup'].includes(mode); $('#app').innerHTML=`<div class="auth-page"><div class="auth-brand brand"><span class="brand-mark">vf</span>VITFinds</div><div class="auth-card"><p class="eyebrow">YOUR CAMPUS, CONNECTED</p><h1>${mode==='signup'?'Join your campus.':mode==='verify'?'Check your inbox.':mode==='reset'?'Choose a new password.':mode==='forgot'?'Let’s get you back in.':'Welcome back.'}</h1><p>Use your university email to find, connect, and pass it on.</p><form id="auth-form" data-mode="${mode}">${mode==='signup'?'<label>Name<input name="name" required minlength="2" maxlength="60" autocomplete="name"></label>':''}<label>University email<input name="email" type="email" required autocomplete="username"></label>${['login','signup','reset'].includes(mode)?'<label>Password<input name="password" type="password" required minlength="10" maxlength="128" autocomplete="'+(mode==='login'?'current-password':'new-password')+'">'+(mode==='signup'?'<small>Use uppercase, lowercase, a number, and a symbol.</small>':'')+'</label>':''}${['verify','reset'].includes(mode)?'<label>Verification code<input name="code" required inputmode="numeric" autocomplete="one-time-code"></label>':''}<p class="form-error" role="alert"></p><button class="primary full-width">${{login:'Sign in',signup:'Create account',verify:'Verify email',forgot:'Send reset code',reset:'Reset password'}[mode]} ↗</button></form><div class="auth-links"><button data-action="auth" data-id="${mode==='login'?'signup':'login'}">${mode==='login'?'Create an account':'Back to sign in'}</button>${!demo&&mode==='login'?'<button data-action="auth" data-id="forgot">Forgot password?</button><button data-action="auth" data-id="verify">Verify email</button>':''}</div>${localMode?'<div class="auth-demo"><span>or</span><button class="secondary full-width" data-action="demo-account" data-id="demo-me">Explore with a demo account</button></div>':''}</div></div>`; }
-async function cognito(action, body) { const res=await fetch(`https://cognito-idp.${config.region}.amazonaws.com/`, {method:'POST',headers:{'Content-Type':'application/x-amz-json-1.1','X-Amz-Target':`AWSCognitoIdentityProviderService.${action}`},body:JSON.stringify(body)});const data=await res.json();if(!res.ok)throw new Error(data.message||'Unable to sign in.');return data; }
-document.addEventListener('click',async e=>{const b=e.target.closest('[data-action]');if(!b)return;e.preventDefault();const {action,id,value}=b.dataset;try{switch(action){case 'nav': view=id;query='';category='All categories';location='Anywhere on campus';render();break;case 'sidebar-toggle':sidebarCollapsed=!sidebarCollapsed;localStorage.setItem('vitfinds-sidebar',sidebarCollapsed?'collapsed':'expanded');render();break;case 'reset-filters':query='';category='All categories';location='Anywhere on campus';sort='newest';render();break;case 'post':post();break;case 'detail':detail(id);break;case 'close':$('#modal').close();break;case 'save':await api(`/listings/${id}/save`,{});await refresh();break;case 'account':account();break;case 'campus':campusPicker();break;case 'demo-account':{const result=await api('/demo-login',{userId:id});authToken=result.token;sessionStorage.setItem('vitfinds-token',authToken);$('#modal').close();view='all';await refresh();break;}case 'contact':case 'claim':case 'report':inputDialog(action,id);break;case 'conversation':conversationId=id;render();break;case 'claim-review':if(value==='accepted'&&!confirm('Confirm you have checked ownership and returned this item?'))return;await api(`/claims/${id}`,{status:value});$('#modal').close();await refresh();toast('Claim updated.');break;case 'read':await api('/notifications/read',{});await refresh();break;case 'moderate':if(value==='remove'&&!confirm('Remove this reported listing from the campus feed?'))return;await api(`/reports/${id}`,{action:value});await refresh();toast('Report resolved.');break;case 'logout':if(demo)await api('/logout',{});authToken='';sessionStorage.removeItem('vitfinds-token');state=null;$('#modal').close();auth();break;case 'auth':auth(id);break;}}catch(err){toast(err.message);}});
-document.addEventListener('input',e=>{if(e.target.id==='search'){query=e.target.value;$('#listing-grid').innerHTML=results();$('#result-count').textContent=filtered().length;}});
-document.addEventListener('change',e=>{if(['category','location','sort'].includes(e.target.id)){if(e.target.id==='category')category=e.target.value;if(e.target.id==='location')location=e.target.value;if(e.target.id==='sort')sort=e.target.value;$('#listing-grid').innerHTML=results();$('#result-count').textContent=filtered().length;}if(e.target.name==='type')updateSaleFields();});
-const readDataUrl = file => new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(r.result);r.onerror=()=>reject(new Error('Could not read photo.'));r.readAsDataURL(file);});
-document.addEventListener('click',async e=>{
-  const b=e.target.closest('[data-action]');if(!b||!['edit-listing','archive-listing'].includes(b.dataset.action))return;
-  try{
-    if(b.dataset.action==='archive-listing') { if(!confirm('Remove this listing from the campus feed? Existing conversations will remain available.'))return;await api(`/listings/${b.dataset.id}/archive`,{});$('#modal').close();await refresh();toast('Listing removed from the feed.');return; }
-    const l=state.listings.find(x=>x.id===b.dataset.id);if(!l)throw new Error('Listing unavailable.');post();const f=$('#post-form');
-    $('#dialog-title').textContent='Edit your listing';
-    for(const key of ['title','description','category','location','date','price','condition'])f.elements[key].value=l[key]??'';
-    f.querySelector(`[name="type"][value="${l.type}"]`).checked=true;updateSaleFields();
-    f.querySelectorAll('[name="type"]').forEach(input=>input.disabled=true);
-    const hidden=document.createElement('input');hidden.type='hidden';hidden.name='id';hidden.value=l.id;f.append(hidden);
-    const type=document.createElement('input');type.type='hidden';type.name='type';type.value=l.type;f.append(type);
-    f.elements.negotiable.checked=l.negotiable;f.querySelector('button').textContent='Save changes ↗';
-    f.querySelector('.form-note').textContent='Uploading new photos replaces the existing photos. Leave photos empty to keep them.';
-  }catch(err){toast(err.message);}
+
+function post(type, listing) {
+  const editing = !!listing;
+  const chosen = listing?.type || (['lost', 'found', 'sale'].includes(type) ? type : (['lost', 'found', 'sale'].includes(view) ? view : 'lost'));
+  const v = key => esc(listing?.[key] ?? '');
+  const options = [['lost', 'lost', 'I lost something', 'Ask campus for help'], ['found', 'found', 'I found something', 'Help it get home'], ['sale', 'sale', 'I’m selling', 'Pass it on']];
+  showModal(`<div class="dialog-pad">
+    <p class="eyebrow">${editing ? 'Edit listing' : 'New listing'}</p>
+    <h2>${editing ? 'Update your <em>post</em>' : 'What brings you <em>here?</em>'}</h2>
+    <form id="post-form" novalidate>
+      ${editing ? `<input type="hidden" name="id" value="${v('id')}"><input type="hidden" name="type" value="${v('type')}">` : ''}
+      <div class="type-pick">${options.map(([val, ic, t, s]) => `<label class="type-opt type-${val}"><input type="radio" name="type" value="${val}" ${chosen === val ? 'checked' : ''} ${editing ? 'disabled' : ''}><span>${icon(ic)}<b>${t}</b><small>${s}</small></span></label>`).join('')}</div>
+      <label>Title<input name="title" required minlength="5" maxlength="100" value="${v('title')}" placeholder="e.g. Black headphones near the library"></label>
+      <div class="cols">
+        <label>Category<select name="category">${categories.map(x => `<option ${listing?.category === x ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select></label>
+        <label>Campus location<select name="location">${locations.map(x => `<option ${listing?.location === x ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select></label>
+      </div>
+      <label>Description<textarea name="description" required minlength="15" maxlength="2000" rows="4" placeholder="Colour, brand, what’s inside. If you found it, keep one identifying detail private.">${v('description')}</textarea></label>
+      <div class="cols">
+        <label>Date<input name="date" type="date" required max="${today()}" value="${v('date') || today()}"></label>
+        <label class="file-drop">${icon('camera')}<span><b>Add photos</b><small>Up to 3 · JPEG, PNG, WebP · 3 MB each</small></span><input name="photos" type="file" accept="image/jpeg,image/png,image/webp" multiple></label>
+      </div>
+      <div class="previews" id="photo-preview"></div>
+      <div id="sale-fields" class="cols three">
+        <label>Price (₹)<input name="price" type="number" min="0" max="1000000" step="1" value="${listing?.price ?? 0}"></label>
+        <label>Condition<select name="condition">${['Good', 'New', 'Like new', 'Fair'].map(x => `<option ${listing?.condition === x ? 'selected' : ''}>${x}</option>`).join('')}</select></label>
+        <label class="check"><input name="negotiable" type="checkbox" ${listing ? (listing.negotiable ? 'checked' : '') : 'checked'}> Open to offers</label>
+      </div>
+      <p class="form-error" role="alert"></p>
+      <button class="btn btn-primary full">${editing ? 'Save changes' : 'Publish listing'} ${icon('arrow')}</button>
+      <p class="fine center">${editing ? 'New photos replace the current ones. Leave photos empty to keep them.' : 'Only post items allowed on campus. Never include ID numbers or phone numbers.'}</p>
+    </form>
+  </div>`);
+  updateSaleFields();
+}
+
+function updateSaleFields() {
+  const el = $('#sale-fields');
+  const picked = $('#post-form [name="type"]:checked') || $('#post-form input[type="hidden"][name="type"]');
+  if (el && picked) el.hidden = picked.value !== 'sale';
+}
+
+function inputDialog(kind, id) {
+  const l = state.listings.find(x => x.id === id);
+  const data = {
+    contact: ['Start a <em>conversation</em>', 'message', 'Introduce yourself, ask a question, or make an offer.', 'Send message', 1, 'Hi! Is this still available?'],
+    claim: ['Is this <em>yours?</em>', 'proof', 'Describe something only the owner would know: a mark, a sticker, the contents. Only the finder sees this.', 'Submit claim', 15, 'e.g. There is a small crack on the left side and my initials inside the cover.'],
+    report: ['Report this <em>listing</em>', 'reason', 'Tell the moderators what’s wrong with this listing.', 'Send report', 10, 'e.g. This looks like spam or a prohibited item.']
+  }[kind];
+  showModal(`<div class="dialog-pad">
+    <p class="eyebrow">${esc(l?.title || 'VITFinds')}</p>
+    <h2>${data[0]}</h2>
+    <form id="action-form" data-kind="${kind}" data-id="${esc(id)}">
+      <label>${data[2]}<textarea name="${data[1]}" rows="5" minlength="${data[4]}" maxlength="1000" required placeholder="${esc(data[5])}"></textarea></label>
+      ${kind === 'claim' ? `<p class="fine">${icon('lock')} Your claim is private between you and the finder.</p>` : ''}
+      <p class="form-error" role="alert"></p>
+      <button class="btn btn-primary full">${data[3]} ${icon('arrow')}</button>
+    </form>
+  </div>`);
+}
+
+function account() {
+  const people = [['demo-me', 'Alex Student', 'Lost a backpack, selling a lamp'], ['demo-priya', 'Priya S.', 'Found headphones, selling a bicycle'], ['demo-arjun', 'Arjun R.', 'Found keys, selling a textbook'], ['demo-admin', 'Campus moderator', 'Reviews reported listings']];
+  showModal(`<div class="dialog-pad">
+    <p class="eyebrow">Your account</p>
+    <h2>${esc(state.user.name)}</h2>
+    ${demo ? `<p class="muted">These are local sample accounts. Switch between students to try messages, claims, and moderation.</p>
+      <div class="accounts">${people.map(([id, name, desc]) => `<button class="${state.user.id === id ? 'on' : ''}" data-action="demo-account" data-id="${id}"><span class="avatar">${initials(name)}</span><span><strong>${name}</strong><small>${desc}</small></span>${state.user.id === id ? icon('check') : icon('right')}</button>`).join('')}</div>`
+      : '<p class="muted">Your university email has been verified.</p>'}
+    <button class="btn btn-outline full" data-action="logout">${icon('logout')} Sign out</button>
+  </div>`);
+}
+
+/* ---------- Auth ---------- */
+function auth(mode = 'login') {
+  const titles = { login: 'Welcome <em>back.</em>', signup: 'Join your <em>campus.</em>', verify: 'Check your <em>inbox.</em>', forgot: 'Let’s get you <em>back in.</em>', reset: 'Choose a new <em>password.</em>' };
+  const button = { login: 'Sign in', signup: 'Create account', verify: 'Verify email', forgot: 'Send reset code', reset: 'Reset password' }[mode];
+  $('#app').innerHTML = `<div class="auth">
+    <aside class="auth-side">
+      <a class="logo light" href="#/home"><span class="logo-mark" aria-hidden="true">V</span><span>VIT<em>Finds</em><b>.</b></span></a>
+      <div>
+        <h1>Find what you’ve <em>lost.</em><br>Return what you’ve <em>found.</em></h1>
+        <ul class="auth-points">
+          <li>${icon('search')} Search everything handed in around campus</li>
+          <li>${icon('lock')} Claim privately with a detail only you know</li>
+          <li>${icon('chat')} Chat in-app, no phone numbers shared</li>
+          <li>${icon('tag')} Buy and sell with students nearby</li>
+        </ul>
+      </div>
+      <div class="auth-float" aria-hidden="true"><span class="badge badge-found">Found</span><b>🎧 Black headphones</b><small>Main Library · 2h ago</small></div>
+    </aside>
+    <section class="auth-main">
+      <div class="auth-card">
+        <p class="eyebrow">For VIT students</p>
+        <h2>${titles[mode]}</h2>
+        <p class="muted">Use your university email to find, return, and pass things on.</p>
+        <form id="auth-form" data-mode="${mode}">
+          ${mode === 'signup' ? '<label>Full name<input name="name" required minlength="2" maxlength="60" autocomplete="name"></label>' : ''}
+          <label>University email<input name="email" type="email" required autocomplete="username" placeholder="you@vitstudent.ac.in"></label>
+          ${['login', 'signup', 'reset'].includes(mode) ? `<label>Password<input name="password" type="password" required minlength="10" maxlength="128" autocomplete="${mode === 'login' ? 'current-password' : 'new-password'}">${mode !== 'login' ? '<small>10+ characters with uppercase, lowercase, a number, and a symbol.</small>' : ''}</label>` : ''}
+          ${['verify', 'reset'].includes(mode) ? '<label>Verification code<input name="code" required inputmode="numeric" autocomplete="one-time-code"></label>' : ''}
+          <p class="form-error" role="alert"></p>
+          <button class="btn btn-primary full">${button} ${icon('arrow')}</button>
+        </form>
+        <div class="auth-links">
+          <button class="link-btn" data-action="auth" data-id="${mode === 'login' ? 'signup' : 'login'}">${mode === 'login' ? 'New here? Create an account' : 'Back to sign in'}</button>
+          ${!demo && mode === 'login' ? '<button class="link-btn" data-action="auth" data-id="forgot">Forgot password?</button><button class="link-btn" data-action="auth" data-id="verify">Verify email</button>' : ''}
+        </div>
+        ${demo && ['login', 'signup'].includes(mode) ? `<div class="or"><span>or</span></div><button class="btn btn-outline full" data-action="demo-account" data-id="demo-me">Explore with a demo account</button>` : ''}
+      </div>
+    </section>
+  </div>`;
+}
+
+async function cognito(action, body) {
+  const res = await fetch(`https://cognito-idp.${config.region}.amazonaws.com/`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-amz-json-1.1', 'X-Amz-Target': `AWSCognitoIdentityProviderService.${action}` },
+    body: JSON.stringify(body)
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.message || 'Unable to sign in.');
+  return data;
+}
+
+function setToken(token) { authToken = token; sessionStorage.setItem('vitfinds-token', token); }
+function closeMenus() {
+  const menu = $('#user-menu');
+  if (menu) { menu.hidden = true; $('[data-action="user-menu"]')?.setAttribute('aria-expanded', 'false'); }
+  const bar = $('.topbar');
+  if (bar) { bar.classList.remove('nav-open'); $('.menu-btn')?.setAttribute('aria-expanded', 'false'); }
+}
+
+/* ---------- Events ---------- */
+window.addEventListener('hashchange', () => {
+  if (!state) return;
+  view = viewFromHash();
+  render();
+  const target = sessionStorage.getItem('vitfinds-scroll');
+  sessionStorage.removeItem('vitfinds-scroll');
+  if (target && document.getElementById(target)) document.getElementById(target).scrollIntoView({ behavior: 'smooth' });
+  else window.scrollTo({ top: 0 });
 });
-document.addEventListener('submit',async e=>{e.preventDefault();const form=e.target;const submit=form.querySelector('button[type="submit"],button:not([type])');if(submit)submit.disabled=true;const fields=new FormData(form);const data=Object.fromEntries(fields);try{
-  if(form.id==='post-form'){const files=fields.getAll('photos').filter(f=>f.size);if(files.length>3||files.some(f=>f.size>3000000))throw new Error('Choose up to 3 photos, each under 3 MB.');data.images=[];for(const file of files){if(!['image/jpeg','image/png','image/webp'].includes(file.type))throw new Error('Choose JPEG, PNG, or WebP photos.');data.images.push((await api('/uploads',{data:await readDataUrl(file)})).url);}delete data.photos;data.negotiable=fields.has('negotiable');await api('/listings',data);$('#modal').close();view='mine';await refresh();toast('Your listing is live.');}
-  else if(form.id==='status-form'){await api(`/listings/${form.dataset.id}/status`,data);$('#modal').close();await refresh();toast('Listing updated.');}
-  else if(form.id==='action-form'){const result=await api(`/listings/${form.dataset.id}/${form.dataset.kind}`,data);$('#modal').close();if(form.dataset.kind==='contact'){view='messages';conversationId=result.id;}await refresh();toast(form.dataset.kind==='claim'?'Claim sent privately to the finder.':form.dataset.kind==='report'?'Report sent to moderators.':'Message sent.');}
-  else if(form.id==='message-form'){await api(`/conversations/${conversationId}/messages`,data);await refresh();}
-  else if(form.id==='auth-form'){const mode=form.dataset.mode;if(demo){const result=await api(`/auth/${mode}`,{name:data.name,email:data.email,password:data.password});authToken=result.token;sessionStorage.setItem('vitfinds-token',authToken);await refresh();toast(mode==='signup'?'Account created. Welcome to VITFinds.':'Welcome back.');}else{const base={ClientId:config.userPoolClientId,Username:data.email.toLowerCase().trim()};if(mode==='signup'){await cognito('SignUp',{...base,Password:data.password,UserAttributes:[{Name:'name',Value:data.name},{Name:'email',Value:base.Username}]});auth('verify');toast('Verification code sent to your university email.');}else if(mode==='verify'){await cognito('ConfirmSignUp',{...base,ConfirmationCode:data.code});auth();toast('Email verified. You can sign in now.');}else if(mode==='forgot'){await cognito('ForgotPassword',base);auth('reset');}else if(mode==='reset'){await cognito('ConfirmForgotPassword',{...base,ConfirmationCode:data.code,Password:data.password});auth();toast('Password reset. Sign in with your new password.');}else{const result=await cognito('InitiateAuth',{ClientId:base.ClientId,AuthFlow:'USER_PASSWORD_AUTH',AuthParameters:{USERNAME:base.Username,PASSWORD:data.password}});if(!result.AuthenticationResult)throw new Error('Additional account verification is required. Contact your administrator.');authToken=result.AuthenticationResult.IdToken;sessionStorage.setItem('vitfinds-token',authToken);await refresh();}}}
-}catch(err){const target=form.querySelector('.form-error');if(target)target.textContent=err.message;else toast(err.message);}finally{if(submit)submit.disabled=false;}});
-$('#modal').addEventListener('click',e=>{if(e.target===$('#modal')){const r=e.target.getBoundingClientRect();if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom)e.target.close();}});
-async function boot(){try{await refresh();}catch(e){if(e.status===401)auth();else{$('#app').innerHTML='<div class="empty"><h1>Couldn’t open your campus</h1><p id="boot-error"></p><button onclick="location.reload()">Try again</button></div>';$('#boot-error').textContent=e.message;}}}
-boot();
-if(document.modelContext?.registerTool){
-  const lifecycle=new AbortController();
-  window.addEventListener('pagehide',()=>lifecycle.abort(),{once:true});
-  for(const tool of [
-    {name:'search_campus_listings',description:'Search visible campus listings by keyword and optional type.',inputSchema:{type:'object',properties:{query:{type:'string'},type:{type:'string',enum:['all','lost','found','sale']}},required:['query'],additionalProperties:false},annotations:{readOnlyHint:true,untrustedContentHint:true},execute(input){if(!state)throw new Error('Sign in first.');if(typeof input?.query!=='string'||!['all','lost','found','sale'].includes(input.type||'all'))throw new Error('Invalid search.');view=input.type||'all';query=input.query;category='All categories';location='Anywhere on campus';render();return filtered().map(({id,title,type,price,status})=>({id,title,type,price,status}));}},
-    {name:'toggle_saved_listing',description:'Save an unsaved listing, or remove an already saved listing, for the current student.',inputSchema:{type:'object',properties:{listingId:{type:'string'}},required:['listingId'],additionalProperties:false},annotations:{readOnlyHint:false,untrustedContentHint:false},async execute(input){if(!state||typeof input?.listingId!=='string'||!state.listings.some(l=>l.id===input.listingId))throw new Error('Choose an available listing.');const result=await api(`/listings/${encodeURIComponent(input.listingId)}/save`,{});await refresh();return result;}}
-  ])try{Promise.resolve(document.modelContext.registerTool(tool,{signal:lifecycle.signal})).catch(()=>{});}catch{}
+
+document.addEventListener('click', async e => {
+  // Plain navigation links: reset filters and close menus, let the browser change the hash.
+  const navLink = e.target.closest('a[data-nav]');
+  if (navLink) {
+    resetFilters();
+    closeMenus();
+    const scrollTo = navLink.dataset.scroll;
+    if (scrollTo) {
+      if (view === 'home' && document.getElementById(scrollTo)) { e.preventDefault(); document.getElementById(scrollTo).scrollIntoView({ behavior: 'smooth' }); }
+      else sessionStorage.setItem('vitfinds-scroll', scrollTo);
+    }
+    return;
+  }
+  if (!e.target.closest('.user-wrap')) { const m = $('#user-menu'); if (m && !m.hidden) closeMenus(); }
+
+  const b = e.target.closest('[data-action]');
+  if (!b) return;
+  e.preventDefault();
+  const { action, id, value } = b.dataset;
+  try {
+    switch (action) {
+      case 'menu': {
+        const bar = $('.topbar'); const open = !bar.classList.contains('nav-open');
+        bar.classList.toggle('nav-open', open); b.setAttribute('aria-expanded', open);
+        break;
+      }
+      case 'user-menu': {
+        const m = $('#user-menu'); m.hidden = !m.hidden; b.setAttribute('aria-expanded', !m.hidden);
+        break;
+      }
+      case 'goto': resetFilters(); go(id); break;
+      case 'quick-category': resetFilters(); category = id; go('all'); break;
+      case 'home-tab': homeTab = id; render(); document.querySelector('.fresh')?.scrollIntoView({ block: 'nearest' }); break;
+      case 'hero-prev': heroIndex--; $('.hero-visual').innerHTML = heroStack(); break;
+      case 'hero-next': heroIndex++; $('.hero-visual').innerHTML = heroStack(); break;
+      case 'reset-filters': resetFilters(); render(); break;
+      case 'post': closeMenus(); post(id); break;
+      case 'detail': detail(id); break;
+      case 'thumb': {
+        const main = $('.detail-main .photo');
+        if (main && main.tagName === 'IMG') main.src = value;
+        document.querySelectorAll('.thumbs button').forEach(x => x.classList.toggle('on', x === b));
+        break;
+      }
+      case 'close': $('#modal').close(); break;
+      case 'save': {
+        const result = await api(`/listings/${id}/save`, {});
+        await refresh();
+        toast(result.saved ? 'Saved. Find it under Saved items.' : 'Removed from saved items.');
+        break;
+      }
+      case 'account': closeMenus(); account(); break;
+      case 'demo-account': {
+        const result = await api('/demo-login', { userId: id });
+        setToken(result.token);
+        if ($('#modal').open) $('#modal').close();
+        view = 'home'; history.replaceState(null, '', '#/home');
+        await refresh();
+        toast(`Signed in as ${state.user.name}.`);
+        break;
+      }
+      case 'contact': case 'claim': case 'report': inputDialog(action, id); break;
+      case 'conversation': if (id) conversationId = id; showThread = !!id; render(); break;
+      case 'claim-review': {
+        if (value === 'accepted' && !confirm('Confirm you checked ownership and handed this item back?')) return;
+        await api(`/claims/${id}`, { status: value });
+        $('#modal').close(); await refresh();
+        toast(value === 'accepted' ? 'Marked as returned. Nice work!' : 'Claim declined.');
+        break;
+      }
+      case 'read': await api('/notifications/read', {}); await refresh(); break;
+      case 'moderate': {
+        if (value === 'remove' && !confirm('Remove this reported listing from VITFinds?')) return;
+        await api(`/reports/${id}`, { action: value });
+        await refresh(); toast('Report resolved.');
+        break;
+      }
+      case 'edit-listing': {
+        const l = state.listings.find(x => x.id === id);
+        if (!l) throw new Error('Listing unavailable.');
+        post(l.type, l);
+        break;
+      }
+      case 'archive-listing': {
+        if (!confirm('Remove this listing from VITFinds? Existing conversations stay available.')) return;
+        await api(`/listings/${id}/archive`, {});
+        $('#modal').close(); await refresh();
+        toast('Listing removed.');
+        break;
+      }
+      case 'logout': {
+        closeMenus();
+        if (demo) await api('/logout', {});
+        authToken = ''; sessionStorage.removeItem('vitfinds-token'); state = null;
+        if ($('#modal').open) $('#modal').close();
+        auth();
+        break;
+      }
+      case 'auth': auth(id); break;
+    }
+  } catch (err) { toast(err.message); }
+});
+
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeMenus(); });
+
+document.addEventListener('input', e => {
+  if (e.target.id === 'search') { query = e.target.value; updateResults(); }
+});
+
+document.addEventListener('change', e => {
+  const t = e.target;
+  if (['category', 'location', 'sort'].includes(t.id)) {
+    if (t.id === 'category') category = t.value;
+    if (t.id === 'location') place = t.value;
+    if (t.id === 'sort') sort = t.value;
+    updateResults();
+  }
+  if (t.name === 'type') updateSaleFields();
+  if (t.name === 'photos') {
+    const files = [...t.files].slice(0, 3);
+    $('#photo-preview').innerHTML = files.map(f => `<img src="${URL.createObjectURL(f)}" alt="Selected photo ${esc(f.name)}">`).join('') + (t.files.length > 3 ? '<small>Only the first 3 photos will be used.</small>' : '');
+  }
+});
+
+const readDataUrl = file => new Promise((resolve, reject) => {
+  const r = new FileReader();
+  r.onload = () => resolve(r.result);
+  r.onerror = () => reject(new Error('Could not read photo.'));
+  r.readAsDataURL(file);
+});
+
+document.addEventListener('submit', async e => {
+  e.preventDefault();
+  const form = e.target;
+  const formId = form.getAttribute('id'); // not form.id: the edit form has an input named "id"
+  const submit = form.querySelector('button:not([type="button"])');
+  if (submit) submit.disabled = true;
+  const fields = new FormData(form);
+  const data = Object.fromEntries(fields);
+  const error = form.querySelector('.form-error');
+  if (error) error.textContent = '';
+  try {
+    if (formId === 'hero-search') {
+      resetFilters(); query = data.q || ''; go(data.type || 'all');
+    } else if (formId === 'post-form') {
+      if (!form.reportValidity()) return;
+      const files = fields.getAll('photos').filter(f => f.size);
+      if (files.length > 3 || files.some(f => f.size > 3000000)) throw new Error('Choose up to 3 photos, each under 3 MB.');
+      data.images = [];
+      for (const file of files) {
+        if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) throw new Error('Choose JPEG, PNG, or WebP photos.');
+        data.images.push((await api('/uploads', { data: await readDataUrl(file) })).url);
+      }
+      delete data.photos;
+      data.negotiable = fields.has('negotiable');
+      await api('/listings', data);
+      $('#modal').close();
+      resetFilters(); go('mine');
+      await refresh();
+      toast(data.id ? 'Listing updated.' : 'Your listing is live.');
+    } else if (formId === 'status-form') {
+      await api(`/listings/${form.dataset.id}/status`, data);
+      $('#modal').close(); await refresh();
+      toast('Status updated.');
+    } else if (formId === 'action-form') {
+      const kind = form.dataset.kind;
+      const result = await api(`/listings/${form.dataset.id}/${kind}`, data);
+      $('#modal').close();
+      if (kind === 'contact') { conversationId = result.id; showThread = true; go('messages'); }
+      await refresh();
+      toast(kind === 'claim' ? 'Claim sent privately to the finder.' : kind === 'report' ? 'Report sent to moderators.' : 'Message sent.');
+    } else if (formId === 'message-form') {
+      await api(`/conversations/${conversationId}/messages`, data);
+      await refresh();
+      $('#message-form input')?.focus();
+    } else if (formId === 'auth-form') {
+      const mode = form.dataset.mode;
+      if (demo) {
+        const result = await api(`/auth/${mode}`, { name: data.name, email: data.email, password: data.password });
+        setToken(result.token);
+        view = viewFromHash();
+        await refresh();
+        toast(mode === 'signup' ? 'Account created. Welcome to VITFinds!' : 'Welcome back.');
+      } else {
+        const base = { ClientId: config.userPoolClientId, Username: data.email.toLowerCase().trim() };
+        if (mode === 'signup') {
+          await cognito('SignUp', { ...base, Password: data.password, UserAttributes: [{ Name: 'name', Value: data.name }, { Name: 'email', Value: base.Username }] });
+          auth('verify'); toast('Verification code sent to your university email.');
+        } else if (mode === 'verify') {
+          await cognito('ConfirmSignUp', { ...base, ConfirmationCode: data.code });
+          auth(); toast('Email verified. You can sign in now.');
+        } else if (mode === 'forgot') {
+          await cognito('ForgotPassword', base); auth('reset');
+        } else if (mode === 'reset') {
+          await cognito('ConfirmForgotPassword', { ...base, ConfirmationCode: data.code, Password: data.password });
+          auth(); toast('Password reset. Sign in with your new password.');
+        } else {
+          const result = await cognito('InitiateAuth', { ClientId: base.ClientId, AuthFlow: 'USER_PASSWORD_AUTH', AuthParameters: { USERNAME: base.Username, PASSWORD: data.password } });
+          if (!result.AuthenticationResult) throw new Error('Additional account verification is required. Contact your administrator.');
+          setToken(result.AuthenticationResult.IdToken);
+          view = viewFromHash();
+          await refresh();
+        }
+      }
+    }
+  } catch (err) {
+    if (error) error.textContent = err.message; else toast(err.message);
+  } finally {
+    if (submit) submit.disabled = false;
+  }
+});
+
+$('#modal').addEventListener('click', e => {
+  if (e.target !== $('#modal')) return;
+  const r = e.target.getBoundingClientRect();
+  if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) e.target.close();
+});
+
+/* ---------- Boot ---------- */
+async function boot() {
+  try {
+    state = await api('/state');
+    view = viewFromHash();
+    render();
+  } catch (e) {
+    if (e.status === 401) auth();
+    else {
+      $('#app').innerHTML = '<div class="boot"><span class="logo-mark" aria-hidden="true">V</span><h1>Couldn’t open your campus</h1><p id="boot-error"></p><button class="btn btn-primary" onclick="location.reload()">Try again</button></div>';
+      $('#boot-error').textContent = e.message;
+    }
+  }
 }
-setInterval(async()=>{if(!state||$('#modal').open||document.hidden||document.activeElement?.matches('input,textarea,select'))return;try{state=await api('/state');if(['messages','activity','admin'].includes(view))render();}catch(e){if(e.status===401){state=null;auth();toast('Your session expired. Please sign in again.');}}},15000);
+boot();
+
+/* Optional WebMCP tools (feature-detected) */
+if (document.modelContext?.registerTool) {
+  const lifecycle = new AbortController();
+  window.addEventListener('pagehide', () => lifecycle.abort(), { once: true });
+  for (const tool of [
+    {
+      name: 'search_campus_listings',
+      description: 'Search visible campus listings by keyword and optional type.',
+      inputSchema: { type: 'object', properties: { query: { type: 'string' }, type: { type: 'string', enum: ['all', 'lost', 'found', 'sale'] } }, required: ['query'], additionalProperties: false },
+      annotations: { readOnlyHint: true, untrustedContentHint: true },
+      execute(input) {
+        if (!state) throw new Error('Sign in first.');
+        if (typeof input?.query !== 'string' || !['all', 'lost', 'found', 'sale'].includes(input.type || 'all')) throw new Error('Invalid search.');
+        resetFilters(); view = input.type || 'all'; query = input.query;
+        history.replaceState(null, '', '#/' + view); render();
+        return filtered().map(({ id, title, type, price, status }) => ({ id, title, type, price, status }));
+      }
+    },
+    {
+      name: 'toggle_saved_listing',
+      description: 'Save an unsaved listing, or remove an already saved listing, for the current student.',
+      inputSchema: { type: 'object', properties: { listingId: { type: 'string' } }, required: ['listingId'], additionalProperties: false },
+      annotations: { readOnlyHint: false, untrustedContentHint: false },
+      async execute(input) {
+        if (!state || typeof input?.listingId !== 'string' || !state.listings.some(l => l.id === input.listingId)) throw new Error('Choose an available listing.');
+        const result = await api(`/listings/${encodeURIComponent(input.listingId)}/save`, {});
+        await refresh();
+        return result;
+      }
+    }
+  ]) try { Promise.resolve(document.modelContext.registerTool(tool, { signal: lifecycle.signal })).catch(() => {}); } catch {}
+}
+
+/* Background refresh every 15s (skipped while typing or a dialog is open) */
+setInterval(async () => {
+  if (!state || $('#modal').open || document.hidden || document.activeElement?.matches('input,textarea,select')) return;
+  try {
+    state = await api('/state');
+    if (['messages', 'activity', 'admin'].includes(view)) render();
+    else {
+      const badge = $('#unread-badge'); const n = unreadCount();
+      if (badge) { badge.textContent = n; badge.hidden = !n; }
+    }
+  } catch (e) {
+    if (e.status === 401) { state = null; auth(); toast('Your session expired. Please sign in again.'); }
+  }
+}, 15000);
