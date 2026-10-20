@@ -27,6 +27,13 @@ export async function execute(s, { method, path, body = {}, user }) {
   const notify = (userId, message) => s.notifications.push({ id: randomUUID(), userId, message, read: false, createdAt: now() });
   const listing = id => { const l = s.listings.find(x => x.id === id && !x.removed); requireThat(l, 404, 'This listing is no longer available.'); return l; };
   const conversation = id => { const c = s.conversations.find(x => x.id === id); requireThat(c && c.members.includes(user.id), 404, 'Conversation not found.'); return c; };
+  const addMessage = (c, value) => {
+    const last = s.messages.filter(m => m.conversationId === c.id).reduce((time, m) => m.createdAt > time ? m.createdAt : time, c.lastMessageAt || '');
+    const createdAt = new Date(Math.max(Date.now(), (Date.parse(last) || 0) + 1)).toISOString();
+    c.lastMessageAt = createdAt;
+    const m = { id: randomUUID(), conversationId: c.id, senderId: user.id, text: value, createdAt };
+    s.messages.push(m); return m;
+  };
   if (method === 'GET' && path === '/api/state') return {
     user: safeUser(user), users: s.users.map(safeUser), listings: s.listings.filter(x => !x.removed),
     saved: s.saved.filter(x => x.userId === user.id).map(x => x.listingId),
@@ -65,9 +72,9 @@ export async function execute(s, { method, path, body = {}, user }) {
       case 'contact': {
         requireThat(l.ownerId !== user.id && l.status === 'active', 400, 'You can contact owners of active listings.');
         let c = s.conversations.find(x => x.listingId === l.id && x.members.includes(user.id));
-        if (!c) { c = { id: randomUUID(), listingId: l.id, members: [user.id, l.ownerId], createdAt: now() }; s.conversations.push(c); }
+        if (!c) { c = { id: `${l.id}:${user.id}`, listingId: l.id, members: [user.id, l.ownerId], createdAt: now() }; s.conversations.push(c); }
         const message = text(body.message, 1, 2000, 'Message');
-        s.messages.push({ id: randomUUID(), conversationId: c.id, senderId: user.id, text: message, createdAt: now() }); notify(l.ownerId, `New message about “${l.title}”.`); return c;
+        addMessage(c, message); notify(l.ownerId, `New message about “${l.title}”.`); return c;
       }
       case 'claim': {
         requireThat(l.type === 'found' && l.status === 'active' && l.ownerId !== user.id, 400, 'This item cannot be claimed.');
@@ -81,8 +88,17 @@ export async function execute(s, { method, path, body = {}, user }) {
       }
     }
   }
+  match = path.match(/^\/api\/conversations\/([^/]+)\/read$/);
+  if (method === 'POST' && match) {
+    const c = conversation(match[1]);
+    const latest = s.messages.filter(m => m.conversationId === c.id && m.senderId !== user.id).sort((a,b) => b.createdAt.localeCompare(a.createdAt))[0];
+    if (latest && (!c.readAt?.[user.id] || c.readAt[user.id] < latest.createdAt)) {
+      c.readAt = { ...c.readAt, [user.id]: latest.createdAt };
+    }
+    return { readAt: c.readAt?.[user.id] || null };
+  }
   match = path.match(/^\/api\/conversations\/([^/]+)\/messages$/);
-  if (method === 'POST' && match) { const c = conversation(match[1]); const m = { id: randomUUID(), conversationId: c.id, senderId: user.id, text: text(body.text, 1, 2000, 'Message'), createdAt: now() }; s.messages.push(m); notify(c.members.find(x => x !== user.id), 'You have a new message.'); return m; }
+  if (method === 'POST' && match) { const c = conversation(match[1]); const m = addMessage(c, text(body.text, 1, 2000, 'Message')); notify(c.members.find(x => x !== user.id), 'You have a new message.'); return m; }
   match = path.match(/^\/api\/claims\/([^/]+)$/);
   if (method === 'POST' && match) {
     const c = s.claims.find(x => x.id === match[1]); requireThat(c, 404, 'Claim not found.'); const l = listing(c.listingId); own(l, user);

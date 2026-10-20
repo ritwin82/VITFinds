@@ -1,10 +1,11 @@
 import { mkdir, cp, readFile } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
-for (const file of ['public/app.js', 'public/config.js', 'src/domain.mjs', 'server.mjs', 'aws/handler.mjs']) execFileSync(process.execPath, ['--check', file], { stdio: 'inherit' });
+for (const file of ['public/app.js', 'public/config.js', 'src/domain.mjs', 'server.mjs', 'aws/handler.mjs', 'aws/realtime.mjs']) execFileSync(process.execPath, ['--check', file], { stdio: 'inherit' });
 await mkdir('dist', { recursive: true }); await cp('public', 'dist', { recursive: true });
 await mkdir('.aws-build', { recursive: true });
 await cp('aws/handler.mjs', '.aws-build/handler.mjs');
 await cp('aws/presignup.mjs', '.aws-build/presignup.mjs');
+await cp('aws/realtime.mjs', '.aws-build/realtime.mjs');
 await cp('src/domain.mjs', '.aws-build/domain.mjs');
 const html = await readFile('dist/index.html', 'utf8'); if (!html.includes('app.js')) throw new Error('Missing app entry.');
 console.log('Production assets built in dist/.');

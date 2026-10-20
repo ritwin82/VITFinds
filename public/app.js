@@ -22,12 +22,95 @@ let state, view = 'all', query = '', category = 'All categories', location = 'An
 let sidebarCollapsed = localStorage.getItem('vitfinds-sidebar') === 'collapsed';
 let authToken = sessionStorage.getItem('vitfinds-token') || '';
 let noticeTimer;
+let liveUserId = null, liveSocket = null, liveAbort = null, liveRetry = null, liveGeneration = 0, syncPromise = null, syncToken = null, syncQueued = false;
+const readPending = new Set();
 function toast(message) { $('#toast').textContent = message; $('#toast').classList.add('visible'); clearTimeout(noticeTimer); noticeTimer = setTimeout(() => $('#toast').classList.remove('visible'), 4500); }
 async function api(path, body, method) {
   const response = await fetch((config.apiUrl || '') + '/api' + path, { method: method || (body ? 'POST' : 'GET'), credentials: demo ? 'same-origin' : 'omit', headers: { 'Content-Type': 'application/json', ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}) });
   const result = await response.json(); if (!response.ok) { const e = new Error(result.error || result.message || 'Request failed. Please try again.'); e.status = response.status; throw e; } return result;
 }
-async function refresh() { state = await api('/state'); render(); }
+function stopRealtime() {
+  liveGeneration++;
+  clearTimeout(liveRetry); liveRetry = null;
+  liveAbort?.abort(); liveAbort = null;
+  liveSocket?.close(); liveSocket = null;
+  liveUserId = null;
+}
+function renderFreshState() {
+  const input = view === 'messages' ? $('#message-form input[name="text"]') : null;
+  const draft = input?.value, focused = document.activeElement === input;
+  const selection = focused ? [input.selectionStart, input.selectionEnd] : null;
+  const oldList = $('.chat-messages'), position = oldList?.scrollTop;
+  const atBottom = !oldList || oldList.scrollHeight - oldList.clientHeight - oldList.scrollTop < 64;
+  render();
+  const replacement = $('#message-form input[name="text"]');
+  if (replacement && draft != null) { replacement.value = draft; if (focused) { replacement.focus(); replacement.setSelectionRange(...selection); } }
+  const list = $('.chat-messages'); if (list) list.scrollTop = atBottom ? list.scrollHeight : position;
+}
+async function markConversationRead() {
+  if (view !== 'messages' || !state || !conversationId || readPending.has(conversationId) || document.hidden) return;
+  const c = state.conversations.find(x => x.id === conversationId);
+  const latest = state.messages.filter(m => m.conversationId === conversationId && m.senderId !== state.user.id).sort((a,b) => b.createdAt.localeCompare(a.createdAt))[0];
+  if (!c || !latest || c.readAt?.[state.user.id] >= latest.createdAt) return;
+  const id = conversationId;
+  readPending.add(id);
+  try { await api(`/conversations/${encodeURIComponent(id)}/read`, {}); c.readAt = { ...c.readAt, [state.user.id]: latest.createdAt }; }
+  catch (error) { console.error('Could not mark conversation read', error); }
+  finally { readPending.delete(id); }
+}
+async function refresh() {
+  if (syncPromise && syncToken === authToken) { syncQueued = true; return syncPromise; }
+  const token = authToken;
+  const task = (async () => {
+    const next = await api('/state');
+    if (token !== authToken) return;
+    if (liveUserId && liveUserId !== next.user.id) stopRealtime();
+    state = next; renderFreshState();
+    if (!liveUserId) startRealtime(next.user.id);
+    void markConversationRead();
+  })();
+  syncPromise = task; syncToken = token;
+  try { return await task; } finally { if (syncPromise === task) { syncPromise = null; if (syncQueued) { syncQueued = false; liveRefresh(); } } }
+}
+function liveRefresh() {
+  void refresh().catch(error => { if (error.status === 401) { stopRealtime(); state = null; auth(); toast('Your session expired. Please sign in again.'); } else console.warn('Could not refresh messages', error); });
+}
+function startRealtime(userId) {
+  liveUserId = userId;
+  const generation = ++liveGeneration;
+  let delay = 1000;
+  const reconnect = () => { if (generation === liveGeneration && authToken) { liveRetry = setTimeout(connect, delay); delay = Math.min(delay * 2, 30000); } };
+  const connect = async () => {
+    if (generation !== liveGeneration || !authToken) return;
+    if (demo) {
+      const controller = new AbortController(); liveAbort = controller;
+      try {
+        const response = await fetch('/api/events', { headers: { Authorization: `Bearer ${authToken}` }, signal: controller.signal });
+        if (!response.ok || !response.body) throw new Error('Live connection unavailable');
+        delay = 1000; liveRefresh();
+        const reader = response.body.getReader(), decoder = new TextDecoder(); let buffer = '';
+        while (generation === liveGeneration) {
+          const { value, done } = await reader.read(); if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const parts = buffer.split('\n\n'); buffer = parts.pop();
+          for (const part of parts) if (part.includes('event: sync')) liveRefresh();
+        }
+      } catch (error) { if (error.name !== 'AbortError') console.warn('Live connection interrupted', error); }
+      if (generation === liveGeneration) reconnect();
+    } else {
+      try {
+        const { ticket } = await api('/realtime-ticket', {});
+        if (generation !== liveGeneration) return;
+        const socket = new WebSocket(`${config.wsUrl}?ticket=${encodeURIComponent(ticket)}`); liveSocket = socket;
+        socket.onopen = () => { delay = 1000; liveRefresh(); };
+        socket.onmessage = event => { try { if (JSON.parse(event.data).type === 'sync') liveRefresh(); } catch {} };
+        socket.onclose = () => { if (liveSocket === socket) liveSocket = null; reconnect(); };
+        socket.onerror = () => socket.close();
+      } catch (error) { console.warn('Live connection interrupted', error); reconnect(); }
+    }
+  };
+  void connect();
+}
 const userName = id => state.users.find(x => x.id === id)?.name || 'Student';
 const initials = name => name.split(' ').map(x => x[0]).slice(0,2).join('');
 const currency = n => Number(n) === 0 ? 'Free' : '₹' + Number(n).toLocaleString('en-IN');
@@ -57,7 +140,9 @@ function messages() {
   if (!conversationId && state.conversations.length) conversationId=state.conversations[0].id;
   const c = state.conversations.find(x=>x.id===conversationId);
   const l = c && state.listings.find(x=>x.id===c.listingId);
-  return `<section class="page-heading"><div><p class="eyebrow">MAKE THE CONNECTION</p><h1>Campus conversations.</h1><p class="subtitle">Keep your number private. Work out the details here.</p></div></section><div class="inbox"><div class="threads"><h2>Messages <span>${state.conversations.length}</span></h2>${state.conversations.map(x=>`<button class="thread ${x.id===conversationId?'active':''}" data-action="conversation" data-id="${x.id}"><span class="avatar">${esc(initials(userName(x.members.find(id=>id!==state.user.id))))}</span><span><strong>${esc(userName(x.members.find(id=>id!==state.user.id)))}</strong><small>${esc(state.listings.find(l=>l.id===x.listingId)?.title || 'Unavailable listing')}</small></span></button>`).join('') || '<p class="muted inset">Start a conversation from a listing.</p>'}</div><div class="chat">${c ? `<div class="chat-header"><strong>${esc(l?.title || 'Unavailable listing')}</strong><small>Arrange a handover in a public campus location.</small></div><div class="chat-messages">${state.messages.filter(m=>m.conversationId===c.id).map(m=>`<div class="message ${m.senderId===state.user.id?'outgoing':''}"><p>${esc(m.text)}</p><small>${new Date(m.createdAt).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}</small></div>`).join('')}</div><form id="message-form" class="chat-compose"><input name="text" required maxlength="2000" aria-label="Message" placeholder="Write a message…"><button class="primary">Send ↗</button></form>` : '<div class="empty"><span>☏</span><h2>A conversation starts here</h2><p>Contact a student from a listing to buy, return, or find an item.</p></div>'}</div></div>`;
+  const unread = x => state.messages.filter(m => m.conversationId === x.id && m.senderId !== state.user.id && m.createdAt > (x.readAt?.[state.user.id] || '')).length;
+  const threads = [...state.conversations].sort((a,b) => (b.lastMessageAt || b.createdAt).localeCompare(a.lastMessageAt || a.createdAt));
+  return `<section class="page-heading"><div><p class="eyebrow">MAKE THE CONNECTION</p><h1>Campus conversations.</h1><p class="subtitle">Keep your number private. Work out the details here.</p></div></section><div class="inbox"><div class="threads"><h2>Messages <span>${state.conversations.length}</span></h2>${threads.map(x=>`<button class="thread ${x.id===conversationId?'active':''}" data-action="conversation" data-id="${x.id}"><span class="avatar">${esc(initials(userName(x.members.find(id=>id!==state.user.id))))}</span><span><strong>${esc(userName(x.members.find(id=>id!==state.user.id)))}</strong><small>${esc(state.listings.find(l=>l.id===x.listingId)?.title || 'Unavailable listing')}</small></span>${unread(x) ? `<span class="unread-count" aria-label="${unread(x)} unread messages">${unread(x)}</span>` : ''}</button>`).join('') || '<p class="muted inset">Start a conversation from a listing.</p>'}</div><div class="chat">${c ? `<div class="chat-header"><strong>${esc(l?.title || 'Unavailable listing')}</strong><small>Arrange a handover in a public campus location.</small></div><div class="chat-messages">${state.messages.filter(m=>m.conversationId===c.id).sort((a,b)=>a.createdAt.localeCompare(b.createdAt)).map(m=>`<div class="message ${m.senderId===state.user.id?'outgoing':''}"><p>${esc(m.text)}</p><small>${new Date(m.createdAt).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}${m.senderId===state.user.id ? ` · ${c.readAt?.[c.members.find(id=>id!==state.user.id)] >= m.createdAt ? 'Read' : 'Sent'}` : ''}</small></div>`).join('')}</div><form id="message-form" class="chat-compose"><input name="text" required maxlength="2000" aria-label="Message" placeholder="Write a message…"><button class="primary">Send ↗</button></form>` : '<div class="empty"><span>☏</span><h2>A conversation starts here</h2><p>Contact a student from a listing to buy, return, or find an item.</p></div>'}</div></div>`;
 }
 function admin() { return `<section class="page-heading"><div><p class="eyebrow">CAMPUS MODERATION</p><h1>Keep the community helpful.</h1><p class="subtitle">Review student reports and remove inappropriate listings.</p></div></section><div class="activity-list">${state.reports.filter(r=>r.status==='open').map(r=>`<article class="report-row"><div><h3>${esc(state.listings.find(l=>l.id===r.listingId)?.title || 'Unavailable listing')}</h3><p>${esc(r.reason)}</p><small>Reported by ${esc(userName(r.userId))}</small></div><div class="button-row"><button class="secondary" data-action="moderate" data-id="${r.id}" data-value="dismiss">Dismiss</button><button class="danger" data-action="moderate" data-id="${r.id}" data-value="remove">Remove listing</button></div></article>`).join('') || '<div class="empty"><h2>No open reports</h2><p>New reports will appear here for review.</p></div>'}</div>`; }
 function render() { $('#app').innerHTML = shell(view==='messages'?messages():view==='activity'?activity():view==='admin'?admin():feed()); }
@@ -99,7 +184,7 @@ document.addEventListener('submit',async e=>{e.preventDefault();const form=e.tar
   if(form.id==='post-form'){const files=fields.getAll('photos').filter(f=>f.size);if(files.length>3||files.some(f=>f.size>3000000))throw new Error('Choose up to 3 photos, each under 3 MB.');data.images=[];for(const file of files){if(!['image/jpeg','image/png','image/webp'].includes(file.type))throw new Error('Choose JPEG, PNG, or WebP photos.');data.images.push((await api('/uploads',{data:await readDataUrl(file)})).url);}delete data.photos;data.negotiable=fields.has('negotiable');await api('/listings',data);$('#modal').close();view='mine';await refresh();toast('Your listing is live.');}
   else if(form.id==='status-form'){await api(`/listings/${form.dataset.id}/status`,data);$('#modal').close();await refresh();toast('Listing updated.');}
   else if(form.id==='action-form'){const result=await api(`/listings/${form.dataset.id}/${form.dataset.kind}`,data);$('#modal').close();if(form.dataset.kind==='contact'){view='messages';conversationId=result.id;}await refresh();toast(form.dataset.kind==='claim'?'Claim sent privately to the finder.':form.dataset.kind==='report'?'Report sent to moderators.':'Message sent.');}
-  else if(form.id==='message-form'){await api(`/conversations/${conversationId}/messages`,data);await refresh();}
+  else if(form.id==='message-form'){const sentText=form.elements.text.value;form.elements.text.value='';try{await api(`/conversations/${conversationId}/messages`,data);await refresh();}catch(error){const current=$('#message-form input[name="text"]');if(current&&!current.value)current.value=sentText;throw error;}}
   else if(form.id==='auth-form'){const mode=form.dataset.mode;if(demo){const result=await api(`/auth/${mode}`,{name:data.name,email:data.email,password:data.password});authToken=result.token;sessionStorage.setItem('vitfinds-token',authToken);await refresh();toast(mode==='signup'?'Account created. Welcome to VITFinds.':'Welcome back.');}else{const base={ClientId:config.userPoolClientId,Username:data.email.toLowerCase().trim()};if(mode==='signup'){await cognito('SignUp',{...base,Password:data.password,UserAttributes:[{Name:'name',Value:data.name},{Name:'email',Value:base.Username}]});auth('verify');toast('Verification code sent to your university email.');}else if(mode==='verify'){await cognito('ConfirmSignUp',{...base,ConfirmationCode:data.code});auth();toast('Email verified. You can sign in now.');}else if(mode==='forgot'){await cognito('ForgotPassword',base);auth('reset');}else if(mode==='reset'){await cognito('ConfirmForgotPassword',{...base,ConfirmationCode:data.code,Password:data.password});auth();toast('Password reset. Sign in with your new password.');}else{const result=await cognito('InitiateAuth',{ClientId:base.ClientId,AuthFlow:'USER_PASSWORD_AUTH',AuthParameters:{USERNAME:base.Username,PASSWORD:data.password}});if(!result.AuthenticationResult)throw new Error('Additional account verification is required. Contact your administrator.');authToken=result.AuthenticationResult.IdToken;sessionStorage.setItem('vitfinds-token',authToken);await refresh();}}}
 }catch(err){const target=form.querySelector('.form-error');if(target)target.textContent=err.message;else toast(err.message);}finally{if(submit)submit.disabled=false;}});
 $('#modal').addEventListener('click',e=>{if(e.target===$('#modal')){const r=e.target.getBoundingClientRect();if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom)e.target.close();}});
@@ -113,4 +198,6 @@ if(document.modelContext?.registerTool){
     {name:'toggle_saved_listing',description:'Save an unsaved listing, or remove an already saved listing, for the current student.',inputSchema:{type:'object',properties:{listingId:{type:'string'}},required:['listingId'],additionalProperties:false},annotations:{readOnlyHint:false,untrustedContentHint:false},async execute(input){if(!state||typeof input?.listingId!=='string'||!state.listings.some(l=>l.id===input.listingId))throw new Error('Choose an available listing.');const result=await api(`/listings/${encodeURIComponent(input.listingId)}/save`,{});await refresh();return result;}}
   ])try{Promise.resolve(document.modelContext.registerTool(tool,{signal:lifecycle.signal})).catch(()=>{});}catch{}
 }
-setInterval(async()=>{if(!state||$('#modal').open||document.hidden||document.activeElement?.matches('input,textarea,select'))return;try{state=await api('/state');if(['messages','activity','admin'].includes(view))render();}catch(e){if(e.status===401){state=null;auth();toast('Your session expired. Please sign in again.');}}},15000);
+document.addEventListener('click', e => { const action = e.target.closest('[data-action]')?.dataset.action; if (action === 'logout' || action === 'demo-account') stopRealtime(); if (action === 'conversation' || action === 'nav') queueMicrotask(() => { const list=$('.chat-messages'); if(list)list.scrollTop=list.scrollHeight; void markConversationRead(); }); });
+document.addEventListener('visibilitychange', () => { if (!document.hidden && state) { liveRefresh(); void markConversationRead(); } });
+setInterval(async()=>{if(!state||document.hidden)return;try{await refresh();}catch(e){if(e.status===401){stopRealtime();state=null;auth();toast('Your session expired. Please sign in again.');}}},60000);
