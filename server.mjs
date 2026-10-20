@@ -12,6 +12,12 @@ if (process.env.JWT_SECRET) jwtSecret = Buffer.from(process.env.JWT_SECRET);
 else try { jwtSecret = Buffer.from(await readFile(`${dataDir}/jwt-secret`, 'utf8'), 'base64'); } catch (e) { if (e.code !== 'ENOENT') throw e; jwtSecret = randomBytes(32); await writeFile(`${dataDir}/jwt-secret`, jwtSecret.toString('base64'), { mode: 0o600 }); }
 if (jwtSecret.length < 32) throw new Error('JWT_SECRET must contain at least 32 characters.');
 const scrypt = promisify(scryptCallback); const revokedTokens = new Map(); const loginAttempts = new Map(); let queue = Promise.resolve();
+const listeners = new Map();
+const publish = userIds => {
+  for (const userId of new Set(userIds)) for (const res of listeners.get(userId) || []) {
+    try { res.write('event: sync\ndata: {}\n\n'); } catch { listeners.get(userId)?.delete(res); }
+  }
+};
 const persist = async () => { await writeFile(`${dataDir}/state.tmp`, JSON.stringify(state)); await rename(`${dataDir}/state.tmp`, `${dataDir}/state.json`); };
 const types = { '.html': 'text/html; charset=utf-8', '.css': 'text/css', '.js': 'text/javascript', '.png': 'image/png', '.jpg': 'image/jpeg', '.webp': 'image/webp', '.svg': 'image/svg+xml' };
 const encode = value => Buffer.from(JSON.stringify(value)).toString('base64url');
@@ -34,7 +40,8 @@ const checkPassword = async (password, user) => { if (!user?.passwordHash || !us
 http.createServer(async (req, res) => {
   const send = (code, value) => { res.writeHead(code, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(value)); };
   try {
-    const path = new URL(req.url, 'http://localhost').pathname;
+    const url = new URL(req.url, 'http://localhost');
+    const path = url.pathname, query = Object.fromEntries(url.searchParams);
     res.setHeader('X-Content-Type-Options', 'nosniff'); res.setHeader('Referrer-Policy', 'same-origin');
     if (path.startsWith('/api/')) {
       if (req.method !== 'GET' && req.headers.origin && req.headers.origin !== `http://${req.headers.host}`) throw new AppError(403, 'Cross-origin request rejected.');
@@ -60,12 +67,22 @@ http.createServer(async (req, res) => {
       const claims = verifyToken(req.headers.authorization); const user = claims ? state.users.find(x => x.id === claims.sub && x.role === claims.role) : null;
       if (path === '/api/logout') { if (claims) revokedTokens.set(claims.jti, claims.exp); for(const [id,exp] of revokedTokens)if(exp<=Math.floor(Date.now()/1000))revokedTokens.delete(id); return send(200, { ok: true }); }
       if (!user) throw new AppError(401, 'Sign in to continue.');
+      if (path === '/api/events' && req.method === 'GET') {
+        res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
+        res.write('event: ready\ndata: {}\n\n');
+        if (!listeners.has(user.id)) listeners.set(user.id, new Set());
+        listeners.get(user.id).add(res);
+        const heartbeat = setInterval(() => res.write(': keepalive\n\n'), 25000);
+        const expiry = setTimeout(() => res.end(), Math.max(1, claims.exp * 1000 - Date.now()));
+        res.on('close', () => { clearInterval(heartbeat); clearTimeout(expiry); listeners.get(user.id)?.delete(res); if (!listeners.get(user.id)?.size) listeners.delete(user.id); });
+        return;
+      }
       if (path === '/api/uploads' && req.method === 'POST') {
         const match = typeof body.data === 'string' && body.data.match(/^data:image\/(jpeg|png|webp);base64,([A-Za-z0-9+/=]+)$/); if (!match) throw new AppError(400, 'Upload a JPEG, PNG, or WebP image.');
         const image = Buffer.from(match[2], 'base64'); if (image.length > 3000000) throw new AppError(413, 'Use an image under 3 MB.');
         const name = `${randomUUID()}.${match[1] === 'jpeg' ? 'jpg' : match[1]}`; await writeFile(`${dataDir}/uploads/${name}`, image); return send(200, { url: `/uploads/${name}` });
       }
-      const run = async () => { const next = structuredClone(state); const result = await execute(next, { method: req.method, path, body, user }); if (req.method !== 'GET') { const previous = state; state = next; try { await persist(); } catch (e) { state = previous; throw e; } } return result; };
+      const run = async () => { const next = structuredClone(state); const result = await execute(next, { method: req.method, path, body, query, user }); if (req.method !== 'GET') { const previous = state; state = next; try { await persist(); } catch (e) { state = previous; throw e; } const newMessages = next.messages.slice(previous.messages.length); const read = path.match(/^\/api\/conversations\/([^/]+)\/read$/); const affected = newMessages.flatMap(m => next.conversations.find(c => c.id === m.conversationId)?.members || []); if (read) affected.push(...(next.conversations.find(c => c.id === read[1])?.members || [])); if (affected.length) publish(affected); } return result; };
       const task = queue.then(run); queue = task.catch(() => {}); return send(200, await task);
     }
     let file;

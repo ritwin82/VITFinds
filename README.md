@@ -20,7 +20,7 @@ The backend saves changes in `.data/state.json`, photos in `.data/uploads/`, and
 - Marketplace prices, condition, negotiability, offers through private messages, and active/reserved/sold status.
 - Private ownership claims, finder review, return confirmation, and resolution of competing claims.
 - Basic possible matches for lost reports, using category and location; not AI image matching.
-- Private conversations, persistent messages, in-app notifications, and periodic refresh.
+- Private conversations, persistent messages, live delivery, unread counts, read receipts, and in-app notifications.
 - Reporting, moderator-only review, and removal of reported listings.
 - Responsive interface, native accessible dialogs, escaped student content, validation, ownership checks, and participant checks.
 - AWS university-email signup, confirmation, sign-in, password reset, and verified-email enforcement.
@@ -36,11 +36,29 @@ node scripts/build.mjs
 
 The build checks JavaScript syntax, copies the web app to `dist/`, and stages only Lambda source files in `.aws-build/`. It does not package local demo data. Tests cover access control, claim privacy, competing claims, validation, saved items, moderation, HTTP sessions, CSRF, photo upload, and persistence.
 
+## Focused read APIs
+
+All routes below require the signed-in user's bearer token. They complement the existing `/api/state` response used by the current browser UI.
+
+| Route | Result |
+| --- | --- |
+| `GET /api/listings` | Browse visible listings with `type`, `category`, `location`, `status`, `q`, and `sort` filters |
+| `GET /api/listings/:id` | Get one visible listing; archived listings return 404 |
+| `GET /api/me` | Get the current user's safe profile and own email address |
+| `GET /api/me/saved-listings` | Get the current user's visible saved listings |
+| `GET /api/conversations` | Get only conversations involving the current user |
+| `GET /api/conversations/:id/messages` | Get message history for a conversation participant |
+| `GET /api/notifications` | Get only the current user's notifications |
+
+Collection routes return `{ items, nextCursor, total }`. Pass `limit=1` through `50` (default `20`) and use the returned `nextCursor` as the next request's `cursor`. Message pages contain the newest messages in chronological display order; the cursor requests older history. Listing sort values are `newest` (default), `oldest`, `price-asc`, and `price-desc`. A cursor is tied to its filters, sort, resource, and user. The AWS adapter still scans the existing DynamoDB table before applying these filters, so response pagination currently reduces payload size but not DynamoDB read work. Indexed queries are required before a wider rollout.
+
 ## Deploy to AWS
 
 Prerequisites: an AWS account, configured AWS CLI credentials, and AWS SAM CLI. Deployment provisions billable resources. No AWS resources have been created by building locally.
 
-The template provisions Cognito, API Gateway HTTP API with JWT authorization, Lambda, DynamoDB, a private S3 bucket, and CloudFront with origin access control. Photos are served through CloudFront at unguessable URLs and should not contain sensitive documents. Direct S3 public access is blocked. The Lambda runtime supplies the AWS SDK v3 clients used by this project.
+The template provisions Cognito, API Gateway HTTP and WebSocket APIs, Lambda, DynamoDB, a private S3 bucket, and CloudFront with origin access control. Photos are served through CloudFront at unguessable URLs and should not contain sensitive documents. Direct S3 public access is blocked. The Lambda runtime supplies the AWS SDK v3 clients used by this project.
+
+Live chat uses an authenticated event stream in local development and a WebSocket API on AWS. The browser obtains a one-use, 60-second connection ticket through the Cognito-protected HTTP API. The WebSocket authorizer consumes that ticket and registers the connection. Messages and read receipts are saved first; connected participants then receive a small sync event and fetch their authorized state. Disconnected clients catch up on reconnect, with a 60-second reconciliation check as a fallback. The server never sends message text in the WebSocket event. Read means the recipient opened the conversation; Sent means the server stored the message. A live AWS deployment still needs to be validated in an AWS account.
 
 ```powershell
 node scripts/build.mjs
@@ -57,7 +75,7 @@ aws s3 sync dist/ s3://YOUR_SITE_BUCKET --region ap-south-1
 aws cloudfront create-invalidation --distribution-id YOUR_DISTRIBUTION_ID --paths '/*'
 ```
 
-Use the actual `SiteBucket` and `DistributionId` outputs in the last two commands. `configure-aws.mjs` writes only public configuration into `dist/config.js`; it does not store AWS credentials. Always run configuration **after** the build, because the build restores local demo configuration in `dist/`. Never deploy an unconfigured `dist/` build. The frontend SiteUrl is an HTTPS CloudFront URL.
+Use the actual `SiteBucket` and `DistributionId` outputs in the last two commands. `configure-aws.mjs` writes only public configuration, including `WebSocketUrl`, into `dist/config.js`; it does not store AWS credentials. Always run configuration **after** the build, because the build restores local demo configuration in `dist/`. Never deploy an unconfigured `dist/` build. The frontend SiteUrl is an HTTPS CloudFront URL.
 
 Create and verify a university student account through the deployed app. Assign a moderator explicitly through Cognito:
 

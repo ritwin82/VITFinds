@@ -725,3 +725,24 @@ dialog::backdrop { background: rgba(10, 20, 16, .5); backdrop-filter: blur(4px);
 @media (max-width: 380px) {
   .grid { grid-template-columns: 1fr; }
 }
+
+/* ---------- Server setup screen & preview mode ---------- */
+code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: .88em; background: var(--bg-2); padding: 2px 6px; border-radius: 6px; }
+.setup { min-height: 100vh; display: grid; place-items: center; padding: 32px 16px; background: radial-gradient(circle at 15% 15%, var(--accent-soft), transparent 40%), radial-gradient(circle at 85% 85%, var(--brand-soft), transparent 45%), var(--bg); }
+.setup-card { width: min(640px, 100%); background: var(--surface); border: 1px solid var(--line); border-radius: 28px; padding: 40px; box-shadow: var(--shadow-lg); }
+.setup-card .logo { display: flex; width: max-content; margin-bottom: 28px; }
+.setup-card h1 { font-size: clamp(2rem, 4.4vw, 2.8rem); margin-bottom: 4px; }
+.setup-steps { list-style: none; padding: 0; margin: 28px 0; display: grid; gap: 14px; }
+.setup-steps li { display: flex; gap: 14px; align-items: flex-start; padding: 16px; border: 1px solid var(--line); border-radius: 16px; }
+.setup-steps li > span { flex: none; width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; background: var(--brand); color: #fff; font-weight: 800; }
+.setup-steps li > div { display: grid; gap: 6px; min-width: 0; }
+.setup-steps small { color: var(--muted); }
+.cmd { display: block; justify-self: start; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: .95rem; background: var(--ink); color: var(--bg); padding: 8px 14px; border-radius: 10px; overflow-wrap: anywhere; }
+.cmd.link:hover { background: var(--brand-2); color: #fff; }
+.preview-bar { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 10px 16px; background: var(--accent); color: #2a1f05; font-size: .88rem; text-align: center; }
+.preview-bar code { background: rgba(0, 0, 0, .1); }
+.preview-bar a { text-decoration: underline; font-weight: 700; }
+@media (max-width: 720px) { .setup-card { padding: 28px 20px; } .setup-card .btn { width: 100%; } }
+
+/* Live chat: unread count on inbox threads */
+.thread .unread-count { margin-left: auto; align-self: center; min-width: 22px; height: 22px; padding: 0 6px; border-radius: 99px; display: inline-flex; align-items: center; justify-content: center; background: var(--brand); color: #fff; font-size: .72rem; font-weight: 700; flex-shrink: 0; }

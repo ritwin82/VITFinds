@@ -4,6 +4,9 @@
 
 const config = window.VITFINDS_CONFIG || {};
 const demo = !config.apiUrl;
+const openedAsFile = location.protocol === 'file:';
+const PREVIEW_NOTE = 'This is a preview with sample data. Start the server (npm start) to post, claim and chat.';
+let preview = false; // true when showing sample data because the server isn't running
 const $ = s => document.querySelector(s);
 const esc = v => String(v ?? '').replace(/[&<>"']/g, x => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[x]));
 
@@ -57,6 +60,9 @@ let heroIndex = 0;
 let homeTab = 'found';
 let authToken = sessionStorage.getItem('vitfinds-token') || '';
 let toastTimer;
+let liveUserId = null, liveSocket = null, liveAbort = null, liveRetry = null, liveGeneration = 0;
+let syncPromise = null, syncToken = null, syncQueued = false;
+const readPending = new Set();
 
 /* ---------- Helpers ---------- */
 function toast(message) {
@@ -68,6 +74,10 @@ function toast(message) {
 }
 
 async function api(path, body, method) {
+  if (preview) {
+    if (path === '/state') return previewState();
+    throw new Error(PREVIEW_NOTE);
+  }
   const response = await fetch((config.apiUrl || '') + '/api' + path, {
     method: method || (body ? 'POST' : 'GET'),
     credentials: demo ? 'same-origin' : 'omit',
@@ -83,7 +93,119 @@ async function api(path, body, method) {
   return result;
 }
 
-async function refresh() { state = await api('/state'); render(); }
+async function refresh() { state = await api('/state'); render(); syncLive(); }
+
+/* ---------- Live updates ----------
+   The server pushes a "sync" event when a message arrives or is read
+   (Server-Sent Events from server.mjs locally, a WebSocket on AWS). */
+function stopRealtime() {
+  liveGeneration++;
+  clearTimeout(liveRetry); liveRetry = null;
+  liveAbort?.abort(); liveAbort = null;
+  liveSocket?.close(); liveSocket = null;
+  liveUserId = null;
+}
+
+function syncLive() {
+  if (preview || !state) return;
+  if (liveUserId && liveUserId !== state.user.id) stopRealtime();
+  if (!liveUserId) startRealtime(state.user.id);
+  void markConversationRead();
+}
+
+function updateBadges() {
+  const badge = $('#unread-badge'); const n = unreadCount();
+  if (badge) { badge.textContent = n; badge.hidden = !n; }
+}
+
+// Re-render without losing a half-typed message or the chat scroll position.
+function renderFreshState() {
+  const input = $('#message-form input[name="text"]');
+  const draft = input?.value, focused = !!input && document.activeElement === input;
+  const selection = focused ? [input.selectionStart, input.selectionEnd] : null;
+  const oldList = $('.chat-messages'), position = oldList?.scrollTop;
+  const atBottom = !oldList || oldList.scrollHeight - oldList.clientHeight - oldList.scrollTop < 64;
+  render();
+  const replacement = $('#message-form input[name="text"]');
+  if (replacement && draft) { replacement.value = draft; }
+  if (replacement && focused) { replacement.focus(); replacement.setSelectionRange(...selection); }
+  const list = $('.chat-messages'); if (list) list.scrollTop = atBottom ? list.scrollHeight : position;
+}
+
+async function markConversationRead() {
+  if (preview || view !== 'messages' || !state || !conversationId || readPending.has(conversationId) || document.hidden) return;
+  if (!$('.chat-messages')?.getClientRects().length) return; // on phones the inbox list is showing, not the chat
+  const c = state.conversations.find(x => x.id === conversationId);
+  const latest = state.messages.filter(m => m.conversationId === conversationId && m.senderId !== state.user.id).sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+  if (!c || !latest || c.readAt?.[state.user.id] >= latest.createdAt) return;
+  const id = conversationId;
+  readPending.add(id);
+  try { await api(`/conversations/${id}/read`, {}); c.readAt = { ...c.readAt, [state.user.id]: latest.createdAt }; }
+  catch (error) { console.error('Could not mark conversation read', error); }
+  finally { readPending.delete(id); }
+}
+
+// Background refresh: only views that show live data are re-rendered, so browsing and forms aren't disturbed.
+async function backgroundRefresh() {
+  if (syncPromise && syncToken === authToken) { syncQueued = true; return syncPromise; }
+  const token = authToken;
+  const task = (async () => {
+    const next = await api('/state');
+    if (token !== authToken || !state || preview) return;
+    state = next;
+    if (['messages', 'activity', 'admin'].includes(view)) renderFreshState(); else updateBadges();
+    syncLive();
+  })();
+  syncPromise = task; syncToken = token;
+  try { return await task; }
+  finally { if (syncPromise === task) { syncPromise = null; if (syncQueued) { syncQueued = false; liveRefresh(); } } }
+}
+
+function sessionExpired() {
+  stopRealtime(); state = null; auth(); toast('Your session expired. Please sign in again.');
+}
+
+function liveRefresh() {
+  void backgroundRefresh().catch(error => { if (error.status === 401) sessionExpired(); else console.warn('Could not refresh messages', error); });
+}
+
+function startRealtime(userId) {
+  liveUserId = userId;
+  const generation = ++liveGeneration;
+  let delay = 1000;
+  const reconnect = () => { if (generation === liveGeneration && authToken) { liveRetry = setTimeout(connect, delay); delay = Math.min(delay * 2, 30000); } };
+  const connect = async () => {
+    if (generation !== liveGeneration || !authToken) return;
+    if (demo) {
+      const controller = new AbortController(); liveAbort = controller;
+      try {
+        const response = await fetch('/api/events', { headers: { Authorization: `Bearer ${authToken}` }, signal: controller.signal });
+        if (!response.ok || !response.body) throw new Error('Live connection unavailable');
+        delay = 1000; liveRefresh();
+        const reader = response.body.getReader(), decoder = new TextDecoder(); let buffer = '';
+        while (generation === liveGeneration) {
+          const { value, done } = await reader.read(); if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const parts = buffer.split('\n\n'); buffer = parts.pop();
+          for (const part of parts) if (part.includes('event: sync')) liveRefresh();
+        }
+      } catch (error) { if (error.name !== 'AbortError') console.warn('Live connection interrupted', error); }
+      if (generation === liveGeneration) reconnect();
+    } else {
+      if (!config.wsUrl) return; // no WebSocket configured: the 15s background refresh still keeps chats up to date
+      try {
+        const { ticket } = await api('/realtime-ticket', {});
+        if (generation !== liveGeneration) return;
+        const socket = new WebSocket(`${config.wsUrl}?ticket=${encodeURIComponent(ticket)}`); liveSocket = socket;
+        socket.onopen = () => { delay = 1000; liveRefresh(); };
+        socket.onmessage = event => { try { if (JSON.parse(event.data).type === 'sync') liveRefresh(); } catch {} };
+        socket.onclose = () => { if (liveSocket === socket) liveSocket = null; reconnect(); };
+        socket.onerror = () => socket.close();
+      } catch (error) { console.warn('Live connection interrupted', error); reconnect(); }
+    }
+  };
+  void connect();
+}
 
 const imageUrl = path => (config.imageBaseUrl || '') + path;
 const userName = id => state.users.find(x => x.id === id)?.name || 'Student';
@@ -135,7 +257,7 @@ function resetFilters() { query = ''; category = ALL_CATEGORIES; place = ANYWHER
 function header() {
   const unread = unreadCount();
   const link = (v, label) => `<a href="#/${v}" data-nav class="nav-link ${view === v ? 'active' : ''}">${label}</a>`;
-  return `<header class="topbar">
+  return `${preview ? `<div class="preview-bar">${icon('sparkle')}<span><b>Preview mode.</b> You’re seeing sample data because the VITFinds server isn’t running. Start it with <code>npm start</code> and open <a href="http://127.0.0.1:3000">127.0.0.1:3000</a> to use everything.</span></div>` : ''}<header class="topbar">
     <div class="topbar-inner">
       <a class="logo" href="#/home" data-nav aria-label="VITFinds home"><span class="logo-mark" aria-hidden="true">V</span><span>VIT<em>Finds</em><b>.</b></span></a>
       <nav class="main-nav" aria-label="Main">
@@ -442,14 +564,19 @@ function messages() {
   const c = state.conversations.find(x => x.id === conversationId);
   const l = c && state.listings.find(x => x.id === c.listingId);
   const other = conv => userName(conv.members.find(id => id !== state.user.id));
-  const lastMsg = conv => state.messages.filter(m => m.conversationId === conv.id).at(-1);
+  const thread = conv => state.messages.filter(m => m.conversationId === conv.id).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  const lastMsg = conv => thread(conv).at(-1);
+  const unread = conv => state.messages.filter(m => m.conversationId === conv.id && m.senderId !== state.user.id && m.createdAt > (conv.readAt?.[state.user.id] || '')).length;
+  const threads = [...state.conversations].sort((a, b) => (b.lastMessageAt || b.createdAt).localeCompare(a.lastMessageAt || a.createdAt));
+  const seen = m => c.readAt?.[c.members.find(id => id !== state.user.id)] >= m.createdAt;
   return `<section class="page-head"><div><p class="eyebrow">Messages</p><h1>Campus <em>conversations.</em></h1><p class="lede">Your number stays private. Sort out the details here.</p></div></section>
   <div class="inbox ${c && showThread ? 'has-open' : ''}">
     <aside class="threads">
       <h2>Inbox <span>${state.conversations.length}</span></h2>
-      ${state.conversations.map(x => `<button class="thread ${x.id === conversationId ? 'on' : ''}" data-action="conversation" data-id="${esc(x.id)}">
+      ${threads.map(x => `<button class="thread ${x.id === conversationId ? 'on' : ''}" data-action="conversation" data-id="${esc(x.id)}">
         <span class="avatar">${esc(initials(other(x)))}</span>
         <span class="thread-copy"><strong>${esc(other(x))}</strong><small>${esc(state.listings.find(li => li.id === x.listingId)?.title || 'Unavailable listing')}</small><em>${esc(lastMsg(x)?.text || '')}</em></span>
+        ${unread(x) && x.id !== conversationId ? `<span class="unread-count" aria-label="${unread(x)} unread">${unread(x)}</span>` : ''}
       </button>`).join('') || '<p class="muted pad">Start a conversation from any listing.</p>'}
     </aside>
     <section class="chat">
@@ -460,7 +587,7 @@ function messages() {
         </div>
         <div class="chat-messages">
           <p class="chat-tip">${icon('shield')} Meet in a public campus spot. Never share passwords or ID numbers.</p>
-          ${state.messages.filter(m => m.conversationId === c.id).map(m => `<div class="msg ${m.senderId === state.user.id ? 'out' : 'in'}"><p>${esc(m.text)}</p><small>${new Date(m.createdAt).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</small></div>`).join('')}
+          ${thread(c).map(m => `<div class="msg ${m.senderId === state.user.id ? 'out' : 'in'}"><p>${esc(m.text)}</p><small>${new Date(m.createdAt).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}${m.senderId === state.user.id ? ` · ${seen(m) ? 'Read' : 'Sent'}` : ''}</small></div>`).join('')}
         </div>
         <form id="message-form" class="chat-compose"><input name="text" required maxlength="2000" autocomplete="off" aria-label="Message" placeholder="Write a message…"><button class="btn btn-primary">Send</button></form>`
       : `<div class="empty"><div class="empty-art">${icon('chat')}</div><h3>A conversation starts here</h3><p>Contact a student from a listing to return, find, or buy an item.</p><a class="btn btn-outline" href="#/all" data-nav>Browse listings</a></div>`}
@@ -675,9 +802,10 @@ function closeMenus() {
 
 /* ---------- Events ---------- */
 window.addEventListener('hashchange', () => {
-  if (!state) return;
+  if (!state || (location.hash && !location.hash.startsWith('#/'))) return; // ignore in-page anchors like #main
   view = viewFromHash();
   render();
+  void markConversationRead();
   const target = sessionStorage.getItem('vitfinds-scroll');
   sessionStorage.removeItem('vitfinds-scroll');
   if (target && document.getElementById(target)) document.getElementById(target).scrollIntoView({ behavior: 'smooth' });
@@ -746,7 +874,7 @@ document.addEventListener('click', async e => {
         break;
       }
       case 'contact': case 'claim': case 'report': inputDialog(action, id); break;
-      case 'conversation': if (id) conversationId = id; showThread = !!id; render(); break;
+      case 'conversation': if (id) conversationId = id; showThread = !!id; render(); void markConversationRead(); break;
       case 'claim-review': {
         if (value === 'accepted' && !confirm('Confirm you checked ownership and handed this item back?')) return;
         await api(`/claims/${id}`, { status: value });
@@ -776,6 +904,8 @@ document.addEventListener('click', async e => {
       }
       case 'logout': {
         closeMenus();
+        if (preview) { if ($('#modal').open) $('#modal').close(); serverHelp(); break; }
+        stopRealtime();
         if (demo) await api('/logout', {});
         authToken = ''; sessionStorage.removeItem('vitfinds-token'); state = null;
         if ($('#modal').open) $('#modal').close();
@@ -783,6 +913,7 @@ document.addEventListener('click', async e => {
         break;
       }
       case 'auth': auth(id); break;
+      case 'preview': preview = true; state = previewState(); view = viewFromHash(); render(); toast(PREVIEW_NOTE); break;
     }
   } catch (err) { toast(err.message); }
 });
@@ -856,7 +987,10 @@ document.addEventListener('submit', async e => {
       await refresh();
       toast(kind === 'claim' ? 'Claim sent privately to the finder.' : kind === 'report' ? 'Report sent to moderators.' : 'Message sent.');
     } else if (formId === 'message-form') {
-      await api(`/conversations/${conversationId}/messages`, data);
+      const sentText = form.elements.text.value;
+      form.elements.text.value = '';
+      try { await api(`/conversations/${conversationId}/messages`, data); }
+      catch (err) { const current = $('#message-form input[name="text"]'); if (current && !current.value) current.value = sentText; throw err; }
       await refresh();
       $('#message-form input')?.focus();
     } else if (formId === 'auth-form') {
@@ -904,12 +1038,16 @@ $('#modal').addEventListener('click', e => {
 
 /* ---------- Boot ---------- */
 async function boot() {
+  if (openedAsFile) return serverHelp();
   try {
     state = await api('/state');
     view = viewFromHash();
     render();
+    syncLive();
   } catch (e) {
     if (e.status === 401) auth();
+    // TypeError: server unreachable. SyntaxError: something answered with HTML, not the API (e.g. VS Code Live Server).
+    else if (e instanceof TypeError || e instanceof SyntaxError || e.status === 404 || e.status === 405) serverHelp();
     else {
       $('#app').innerHTML = '<div class="boot"><span class="logo-mark" aria-hidden="true">V</span><h1>Couldn’t open your campus</h1><p id="boot-error"></p><button class="btn btn-primary" onclick="location.reload()">Try again</button></div>';
       $('#boot-error').textContent = e.message;
@@ -917,6 +1055,42 @@ async function boot() {
   }
 }
 boot();
+
+/* ---------- Server not running: instructions + sample-data preview ---------- */
+function serverHelp() {
+  state = null; preview = false;
+  $('#app').innerHTML = `<div class="setup">
+    <div class="setup-card">
+      <a class="logo"><span class="logo-mark" aria-hidden="true">V</span><span>VIT<em>Finds</em><b>.</b></span></a>
+      <p class="eyebrow">One quick step</p>
+      <h1>Start the VITFinds <em>server</em> first.</h1>
+      <p class="lede">${openedAsFile ? 'You opened <code>index.html</code> straight from the folder.' : 'This page can’t reach the VITFinds API.'} Accounts, listings, photos and chat all come from <code>server.mjs</code>, so the site has to be opened through it.</p>
+      <ol class="setup-steps">
+        <li><span>1</span><div><b>Open a terminal in your VITFinds folder</b><small>The folder that has <code>server.mjs</code> and <code>package.json</code>. In VS Code: Terminal → New Terminal.</small></div></li>
+        <li><span>2</span><div><b>Run the server</b><code class="cmd">npm start</code><small>Needs Node.js 22 or newer. <code>node server.mjs</code> does the same thing.</small></div></li>
+        <li><span>3</span><div><b>Open the site</b><a class="cmd link" href="http://127.0.0.1:3000">http://127.0.0.1:3000</a><small>Keep the terminal open while you use it. Don’t use Live Server or double-click the file.</small></div></li>
+      </ol>
+      <div class="btn-row">
+        <a class="btn btn-primary" href="http://127.0.0.1:3000">I’ve started it, open the site ${icon('arrow')}</a>
+        <button class="btn btn-outline" data-action="preview">Preview the design with sample data</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function previewState() {
+  const users = [['demo-me', 'Alex Student'], ['demo-priya', 'Priya S.'], ['demo-arjun', 'Arjun R.']].map(([id, name]) => ({ id, name, role: 'student', verified: true }));
+  const rows = [
+    ['found', 'A little music, missing its person', 'Black wireless headphones found on the second floor of the library. Tell me the brand and a distinguishing detail to claim them.', 'Electronics', 'Main Library', 0, 'headphones', 'demo-priya'],
+    ['sale', 'Your next semester, sorted', 'Engineering Mathematics textbook. Clean pages, a few useful pencil notes. Available for pickup near SJT.', 'Books & stationery', 'SJT', 350, 'books', 'demo-arjun'],
+    ['lost', 'Have you seen my blue backpack?', 'Lost my navy backpack after the afternoon class at TT. It has a notebook inside. Please get in touch if you find it.', 'ID & essentials', 'TT', 0, 'backpack', 'demo-me'],
+    ['sale', 'A better way to get to class', 'Single-speed campus bicycle in good condition. Recently serviced brakes. Price is negotiable.', 'Cycles & sports', 'Mens Hostel', 2800, 'cycle', 'demo-priya'],
+    ['found', 'Keys looking for their way home', 'A set of keys was found near Foodys. Describe the keychain so I can verify ownership.', 'ID & essentials', 'Foodys', 0, 'keys', 'demo-arjun'],
+    ['sale', 'Make room for a little light', 'Compact study lamp with three brightness settings. Works perfectly. Moving out this semester.', 'Hostel essentials', 'Ladies Hostel', 450, 'lamp', 'demo-me']
+  ];
+  const listings = rows.map((r, i) => ({ id: `sample-${i + 1}`, type: r[0], title: r[1], description: r[2], category: r[3], location: r[4], price: r[5], art: r[6], ownerId: r[7], status: 'active', condition: 'Good', negotiable: true, images: [], date: today(), createdAt: new Date(Date.now() - i * 3600000).toISOString(), demo: true }));
+  return { user: users[0], users, listings, saved: [], conversations: [], messages: [], claims: [], notifications: [{ id: 'n1', message: 'Welcome to the VITFinds preview!', read: false, createdAt: new Date().toISOString() }], reports: [] };
+}
 
 /* Optional WebMCP tools (feature-detected) */
 if (document.modelContext?.registerTool) {
@@ -951,17 +1125,10 @@ if (document.modelContext?.registerTool) {
   ]) try { Promise.resolve(document.modelContext.registerTool(tool, { signal: lifecycle.signal })).catch(() => {}); } catch {}
 }
 
-/* Background refresh every 15s (skipped while typing or a dialog is open) */
-setInterval(async () => {
-  if (!state || $('#modal').open || document.hidden || document.activeElement?.matches('input,textarea,select')) return;
-  try {
-    state = await api('/state');
-    if (['messages', 'activity', 'admin'].includes(view)) render();
-    else {
-      const badge = $('#unread-badge'); const n = unreadCount();
-      if (badge) { badge.textContent = n; badge.hidden = !n; }
-    }
-  } catch (e) {
-    if (e.status === 401) { state = null; auth(); toast('Your session expired. Please sign in again.'); }
-  }
+/* Background refresh every 15s as a fallback to live updates (claims, notifications, reports) */
+setInterval(() => {
+  if (!state || preview || document.hidden) return;
+  liveRefresh();
 }, 15000);
+
+document.addEventListener('visibilitychange', () => { if (!document.hidden && state && !preview) liveRefresh(); });

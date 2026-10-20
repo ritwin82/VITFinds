@@ -89,6 +89,122 @@ Resources:
         SSEEnabled: true
       PointInTimeRecoverySpecification:
         PointInTimeRecoveryEnabled: true
+  RealtimeTickets:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: ticket
+          AttributeType: S
+      KeySchema:
+        - AttributeName: ticket
+          KeyType: HASH
+      TimeToLiveSpecification:
+        AttributeName: expiresAt
+        Enabled: true
+  RealtimeConnections:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: connectionId
+          AttributeType: S
+        - AttributeName: userId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: connectionId
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: ByUser
+          KeySchema:
+            - AttributeName: userId
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+      TimeToLiveSpecification:
+        AttributeName: expiresAt
+        Enabled: true
+  WebSocketApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: !Sub '${AWS::StackName}-realtime'
+      ProtocolType: WEBSOCKET
+      RouteSelectionExpression: '$request.body.action'
+  RealtimeAuthorizerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../.aws-build/
+      Handler: realtime.authorize
+      Runtime: nodejs22.x
+      Environment:
+        Variables:
+          TICKET_TABLE: !Ref RealtimeTickets
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref RealtimeTickets
+  RealtimeConnectionFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../.aws-build/
+      Handler: realtime.connection
+      Runtime: nodejs22.x
+      Environment:
+        Variables:
+          CONNECTION_TABLE: !Ref RealtimeConnections
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref RealtimeConnections
+  RealtimeAuthorizer:
+    Type: AWS::ApiGatewayV2::Authorizer
+    Properties:
+      ApiId: !Ref WebSocketApi
+      AuthorizerType: REQUEST
+      Name: TicketAuthorizer
+      IdentitySource:
+        - route.request.querystring.ticket
+      AuthorizerUri: !Sub 'arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${RealtimeAuthorizerFunction.Arn}/invocations'
+  RealtimeIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref WebSocketApi
+      IntegrationType: AWS_PROXY
+      IntegrationMethod: POST
+      IntegrationUri: !Sub 'arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${RealtimeConnectionFunction.Arn}/invocations'
+  ConnectRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref WebSocketApi
+      RouteKey: '$connect'
+      AuthorizationType: CUSTOM
+      AuthorizerId: !Ref RealtimeAuthorizer
+      Target: !Sub 'integrations/${RealtimeIntegration}'
+  DisconnectRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref WebSocketApi
+      RouteKey: '$disconnect'
+      Target: !Sub 'integrations/${RealtimeIntegration}'
+  RealtimeStage:
+    Type: AWS::ApiGatewayV2::Stage
+    DependsOn: [ConnectRoute, DisconnectRoute]
+    Properties:
+      ApiId: !Ref WebSocketApi
+      StageName: live
+      AutoDeploy: true
+  RealtimeAuthorizerPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref RealtimeAuthorizerFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${WebSocketApi}/authorizers/${RealtimeAuthorizer}'
+  RealtimeConnectionPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref RealtimeConnectionFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${WebSocketApi}/*'
   BeforeSignUp:
     Type: AWS::Serverless::Function
     Properties:
@@ -184,9 +300,20 @@ Resources:
           TABLE_NAME: !Ref Data
           SITE_BUCKET: !Ref SiteBucket
           UNIVERSITY_DOMAINS: !Ref UniversityDomains
+          TICKET_TABLE: !Ref RealtimeTickets
+          CONNECTION_TABLE: !Ref RealtimeConnections
+          WS_MANAGEMENT_URL: !Sub 'https://${WebSocketApi}.execute-api.${AWS::Region}.amazonaws.com/live'
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref Data
+        - DynamoDBCrudPolicy:
+            TableName: !Ref RealtimeTickets
+        - DynamoDBCrudPolicy:
+            TableName: !Ref RealtimeConnections
+        - Statement:
+            - Effect: Allow
+              Action: execute-api:ManageConnections
+              Resource: !Sub 'arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${WebSocketApi}/live/POST/@connections/*'
         - Statement:
             - Effect: Allow
               Action: s3:PutObject
@@ -212,6 +339,8 @@ Outputs:
     Value: !Ref Distribution
   ApiUrl:
     Value: !Sub 'https://${Api}.execute-api.${AWS::Region}.amazonaws.com'
+  WebSocketUrl:
+    Value: !Sub 'wss://${WebSocketApi}.execute-api.${AWS::Region}.amazonaws.com/live'
   UserPoolId:
     Value: !Ref Students
   UserPoolClientId:
