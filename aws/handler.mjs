@@ -53,7 +53,7 @@ export async function handler(event) {
     const allowedDomains = (process.env.UNIVERSITY_DOMAINS || 'vitstudent.ac.in').split(',').map(x=>x.trim());
     if (!claims?.sub || ![true, 'true'].includes(claims.email_verified) || !allowedDomains.includes(claims.email?.split('@')[1])) throw new AppError(403, 'A verified university account is required.');
     let body = {}; try { body = event.body ? JSON.parse(event.isBase64Encoded ? Buffer.from(event.body, 'base64').toString() : event.body) : {}; } catch { throw new AppError(400, 'Invalid request.'); }
-    const path = event.rawPath, method = event.requestContext.http.method;
+    const path = event.rawPath, method = event.requestContext.http.method, query = event.queryStringParameters || {};
     if (path === '/api/realtime-ticket' && method === 'POST') {
       const ticket = randomUUID();
       await db.send(new PutCommand({ TableName: process.env.TICKET_TABLE, Item: { ticket, userId: claims.sub, expiresAt: Math.floor(Date.now() / 1000) + 60 } }));
@@ -73,7 +73,7 @@ export async function handler(event) {
       const role = String(claims['cognito:groups'] || '').split(/[\[\]," ]+/).includes('Admins') ? 'admin' : 'student';
       if (!user) { user = { id: claims.sub, name: (claims.name || 'Student').slice(0,60), email: claims.email, verified: true, role }; after.users.push(user); }
       else { user.role = role; user.name = (claims.name || user.name).slice(0,60); }
-      const result = await execute(after, { method, path, body, user });
+      const result = await execute(after, { method, path, body, query, user });
       try {
         await save(before, after);
         const added = after.messages.slice(before.messages.length);

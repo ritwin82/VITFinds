@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execute, initialState } from '../src/domain.mjs';
-const setup = () => {const state=initialState(true);return {state,call:(method,path,body={},id='demo-me')=>execute(state,{method,path,body,user:state.users.find(u=>u.id===id)})};};
+const setup = () => {const state=initialState(true);return {state,call:(method,path,body={},id='demo-me',query={})=>execute(state,{method,path,body,query,user:state.users.find(u=>u.id===id)})};};
 test('unauthenticated requests are rejected',async()=>{await assert.rejects(execute(initialState(),{method:'GET',path:'/api/state'}),e=>e.status===401);});
 test('only an owner can update status; statuses match listing type',async()=>{const {call}=setup();await assert.rejects(call('POST','/api/listings/sample-1/status',{status:'returned'}),e=>e.status===403);await assert.rejects(call('POST','/api/listings/sample-3/status',{status:'sold'}),e=>e.status===400);assert.equal((await call('POST','/api/listings/sample-3/status',{status:'returned'})).status,'returned');});
 test('listing validation rejects invalid prices, image paths, and future dates',async()=>{const {call}=setup();const data={type:'sale',title:'A desk for sale',description:'A sturdy desk in good condition.',category:'Hostel essentials',location:'Mens Hostel',date:new Date().toISOString().slice(0,10),images:[],price:500};for(const changes of [{price:-1},{images:['javascript:alert(1)']},{date:'2999-01-01'},{title:'a'},{category:'invalid'}])await assert.rejects(call('POST','/api/listings',{...data,...changes}),e=>e.status===400);const l=await call('POST','/api/listings',data);assert.equal(l.ownerId,'demo-me');assert.equal(l.price,500);});
@@ -13,3 +13,36 @@ test('saved items are personal and can be toggled off',async()=>{const {call}=se
 test('only moderators can act on reports and removed items disappear',async()=>{const {call}=setup();const r=await call('POST','/api/listings/sample-2/report',{reason:'This listing contains misleading information.'});await assert.rejects(call('POST',`/api/reports/${r.id}`,{action:'remove'}),e=>e.status===403);assert.equal((await call('GET','/api/state')).reports.length,0);await call('POST',`/api/reports/${r.id}`,{action:'remove'},'demo-admin');assert.ok(!(await call('GET','/api/state')).listings.some(l=>l.id==='sample-2'));await assert.rejects(call('POST','/api/listings/sample-2/contact',{message:'Hello'}),e=>e.status===404);});
 test('student directory never exposes emails',async()=>{const {call}=setup();const result=await call('GET','/api/state');assert.ok(result.users.every(u=>!Object.hasOwn(u,'email')));assert.ok(!Object.hasOwn(result.user,'email'));});
 test('owners can edit and remove listings; other students cannot',async()=>{const {call,state}=setup();const item=state.listings.find(x=>x.id==='sample-3');await assert.rejects(call('POST','/api/listings',{...item,title:'Updated backpack details'},'demo-priya'),e=>e.status===403);const updated=await call('POST','/api/listings',{...item,title:'Updated backpack details'});assert.equal(updated.id,item.id);assert.equal(state.listings.length,6);assert.equal(updated.title,'Updated backpack details');await assert.rejects(call('POST',`/api/listings/${item.id}/archive`,{},'demo-priya'),e=>e.status===403);await call('POST',`/api/listings/${item.id}/archive`,{});assert.ok(!(await call('GET','/api/state')).listings.some(l=>l.id===item.id));});
+test('listing discovery filters, sorts, and paginates without exposing removed listings',async()=>{
+ const {call}=setup();
+ const first=await call('GET','/api/listings',{},'demo-me',{limit:'2',sort:'newest'});
+ assert.equal(first.items.length,2);assert.equal(first.total,6);assert.ok(first.nextCursor);
+ const second=await call('GET','/api/listings',{},'demo-me',{limit:'2',sort:'newest',cursor:first.nextCursor});
+ assert.equal(second.items.length,2);assert.ok(!second.items.some(x=>first.items.some(y=>x.id===y.id)));
+ const sale=await call('GET','/api/listings',{},'demo-me',{type:'sale',sort:'price-asc',q:'book'});
+ assert.equal(sale.total,1);assert.equal(sale.items[0].id,'sample-2');
+ assert.equal((await call('GET','/api/listings/sample-2')).id,'sample-2');
+ await assert.rejects(call('GET','/api/listings',{},'demo-me',{limit:'51'}),e=>e.status===400);
+ await assert.rejects(call('GET','/api/listings',{},'demo-me',{sort:'oldest',cursor:first.nextCursor}),e=>e.status===400);
+ await call('POST','/api/listings/sample-2/archive',{},'demo-arjun');
+ await assert.rejects(call('GET','/api/listings/sample-2'),e=>e.status===404);
+ assert.ok(!(await call('GET','/api/listings')).items.some(x=>x.id==='sample-2'));
+});
+test('focused account, saved, conversation, message, and notification reads respect ownership',async()=>{
+ const {call}=setup();
+ const me=await call('GET','/api/me');assert.equal(me.email,'alex@vitstudent.ac.in');assert.ok(!Object.hasOwn(me,'passwordHash'));
+ await call('POST','/api/listings/sample-2/save');
+ assert.deepEqual((await call('GET','/api/me/saved-listings')).items.map(x=>x.id),['sample-2']);
+ assert.equal((await call('GET','/api/me/saved-listings',{},'demo-priya')).total,0);
+ const c=await call('POST','/api/listings/sample-2/contact',{message:'Is this available?'});
+ await call('POST',`/api/conversations/${c.id}/messages`,{text:'Yes, it is.'},'demo-arjun');
+ assert.equal((await call('GET','/api/conversations')).total,1);
+ assert.equal((await call('GET','/api/conversations',{},'demo-priya')).total,0);
+ const recent=await call('GET',`/api/conversations/${c.id}/messages`,{},'demo-me',{limit:'1'});
+ assert.equal(recent.items[0].text,'Yes, it is.');assert.ok(recent.nextCursor);
+ const older=await call('GET',`/api/conversations/${c.id}/messages`,{},'demo-me',{limit:'1',cursor:recent.nextCursor});
+ assert.equal(older.items[0].text,'Is this available?');
+ await assert.rejects(call('GET',`/api/conversations/${c.id}/messages`,{},'demo-priya'),e=>e.status===404);
+ assert.equal((await call('GET','/api/notifications',{},'demo-arjun')).total,1);
+ assert.equal((await call('GET','/api/notifications',{},'demo-priya')).total,0);
+});

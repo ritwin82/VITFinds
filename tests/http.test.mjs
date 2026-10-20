@@ -18,6 +18,8 @@ test('HTTP workflow: authentication, upload, listing, persistence, CSRF, logout'
    assert.equal((await request('/api/auth/login',{email:'test@vitstudent.ac.in',password:'wrong-password'})).status,401);
    const login=await request('/api/auth/login',{email:'test@vitstudent.ac.in',password:'Secure#1234'});assert.equal(login.status,200);token=(await login.json()).token;assert.equal(token.split('.').length,3);
    const originalToken=token;token=token.slice(0,-1)+(token.endsWith('a')?'b':'a');assert.equal((await request('/api/state')).status,401);token=originalToken;
+   const browse=await request('/api/listings?type=sale&sort=price-asc&limit=1');assert.equal(browse.status,200);const browsePage=await browse.json();assert.equal(browsePage.items.length,1);assert.equal(browsePage.items[0].id,'sample-2');
+   assert.equal((await request('/api/me')).status,200);
    const receiverLogin=await request('/api/demo-login',{userId:'demo-priya'});const receiverToken=(await receiverLogin.json()).token;
    const events=await fetch(base+'/api/events',{headers:{Authorization:`Bearer ${receiverToken}`}});assert.equal(events.status,200);
    const stream=events.body.getReader();assert.match(new TextDecoder().decode((await stream.read()).value),/event: ready/);

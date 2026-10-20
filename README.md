@@ -36,6 +36,22 @@ node scripts/build.mjs
 
 The build checks JavaScript syntax, copies the web app to `dist/`, and stages only Lambda source files in `.aws-build/`. It does not package local demo data. Tests cover access control, claim privacy, competing claims, validation, saved items, moderation, HTTP sessions, CSRF, photo upload, and persistence.
 
+## Focused read APIs
+
+All routes below require the signed-in user's bearer token. They complement the existing `/api/state` response used by the current browser UI.
+
+| Route | Result |
+| --- | --- |
+| `GET /api/listings` | Browse visible listings with `type`, `category`, `location`, `status`, `q`, and `sort` filters |
+| `GET /api/listings/:id` | Get one visible listing; archived listings return 404 |
+| `GET /api/me` | Get the current user's safe profile and own email address |
+| `GET /api/me/saved-listings` | Get the current user's visible saved listings |
+| `GET /api/conversations` | Get only conversations involving the current user |
+| `GET /api/conversations/:id/messages` | Get message history for a conversation participant |
+| `GET /api/notifications` | Get only the current user's notifications |
+
+Collection routes return `{ items, nextCursor, total }`. Pass `limit=1` through `50` (default `20`) and use the returned `nextCursor` as the next request's `cursor`. Message pages contain the newest messages in chronological display order; the cursor requests older history. Listing sort values are `newest` (default), `oldest`, `price-asc`, and `price-desc`. A cursor is tied to its filters, sort, resource, and user. The AWS adapter still scans the existing DynamoDB table before applying these filters, so response pagination currently reduces payload size but not DynamoDB read work. Indexed queries are required before a wider rollout.
+
 ## Deploy to AWS
 
 Prerequisites: an AWS account, configured AWS CLI credentials, and AWS SAM CLI. Deployment provisions billable resources. No AWS resources have been created by building locally.

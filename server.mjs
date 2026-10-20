@@ -40,7 +40,8 @@ const checkPassword = async (password, user) => { if (!user?.passwordHash || !us
 http.createServer(async (req, res) => {
   const send = (code, value) => { res.writeHead(code, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(value)); };
   try {
-    const path = new URL(req.url, 'http://localhost').pathname;
+    const url = new URL(req.url, 'http://localhost');
+    const path = url.pathname, query = Object.fromEntries(url.searchParams);
     res.setHeader('X-Content-Type-Options', 'nosniff'); res.setHeader('Referrer-Policy', 'same-origin');
     if (path.startsWith('/api/')) {
       if (req.method !== 'GET' && req.headers.origin && req.headers.origin !== `http://${req.headers.host}`) throw new AppError(403, 'Cross-origin request rejected.');
@@ -81,7 +82,7 @@ http.createServer(async (req, res) => {
         const image = Buffer.from(match[2], 'base64'); if (image.length > 3000000) throw new AppError(413, 'Use an image under 3 MB.');
         const name = `${randomUUID()}.${match[1] === 'jpeg' ? 'jpg' : match[1]}`; await writeFile(`${dataDir}/uploads/${name}`, image); return send(200, { url: `/uploads/${name}` });
       }
-      const run = async () => { const next = structuredClone(state); const result = await execute(next, { method: req.method, path, body, user }); if (req.method !== 'GET') { const previous = state; state = next; try { await persist(); } catch (e) { state = previous; throw e; } const newMessages = next.messages.slice(previous.messages.length); const read = path.match(/^\/api\/conversations\/([^/]+)\/read$/); const affected = newMessages.flatMap(m => next.conversations.find(c => c.id === m.conversationId)?.members || []); if (read) affected.push(...(next.conversations.find(c => c.id === read[1])?.members || [])); if (affected.length) publish(affected); } return result; };
+      const run = async () => { const next = structuredClone(state); const result = await execute(next, { method: req.method, path, body, query, user }); if (req.method !== 'GET') { const previous = state; state = next; try { await persist(); } catch (e) { state = previous; throw e; } const newMessages = next.messages.slice(previous.messages.length); const read = path.match(/^\/api\/conversations\/([^/]+)\/read$/); const affected = newMessages.flatMap(m => next.conversations.find(c => c.id === m.conversationId)?.members || []); if (read) affected.push(...(next.conversations.find(c => c.id === read[1])?.members || [])); if (affected.length) publish(affected); } return result; };
       const task = queue.then(run); queue = task.catch(() => {}); return send(200, await task);
     }
     let file;

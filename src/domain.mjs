@@ -6,6 +6,33 @@ export const locations = ['SJT', 'TT', 'Main Library', 'Foodys', 'Mens Hostel', 
 const text = (v, min, max, label) => { requireThat(typeof v === 'string' && v.trim().length >= min && v.trim().length <= max, 400, `${label} must be ${min}–${max} characters.`); return v.trim(); };
 const own = (item, user) => requireThat(item.ownerId === user.id, 403, 'Only the owner can change this listing.');
 const safeUser = u => ({ id: u.id, name: u.name, role: u.role, verified: !!u.verified });
+const compareValue = (a, b) => a === b ? 0 : a < b ? -1 : 1;
+const compareKeys = (a, b, directions) => {
+  for (let i = 0; i < directions.length; i++) { const difference = compareValue(a[i], b[i]); if (difference) return difference * directions[i]; }
+  return 0;
+};
+function pageRows(rows, query, scope, key, directions, newestFirst = false) {
+  const limit = query.limit === undefined ? 20 : Number(query.limit);
+  requireThat(Number.isInteger(limit) && limit >= 1 && limit <= 50, 400, 'Limit must be between 1 and 50.');
+  let after;
+  if (query.cursor !== undefined) {
+    try {
+      requireThat(typeof query.cursor === 'string' && query.cursor.length <= 2048, 400, 'Invalid cursor.');
+      const parsed = JSON.parse(Buffer.from(query.cursor, 'base64url').toString('utf8'));
+      requireThat(parsed.scope === scope && Array.isArray(parsed.key) && parsed.key.length === directions.length, 400, 'Cursor does not match this request.');
+      after = parsed.key;
+    } catch { throw new AppError(400, 'Invalid cursor.'); }
+  }
+  const ordered = [...rows].sort((a, b) => compareKeys(key(a), key(b), directions));
+  const start = after ? ordered.findIndex(row => compareKeys(key(row), after, directions) > 0) : 0;
+  const slice = ordered.slice(start < 0 ? ordered.length : start, (start < 0 ? ordered.length : start) + limit);
+  const last = slice.at(-1);
+  return {
+    items: newestFirst ? slice.reverse() : slice,
+    nextCursor: last && (start < 0 ? ordered.length : start) + limit < ordered.length ? Buffer.from(JSON.stringify({ scope, key: key(last) })).toString('base64url') : null,
+    total: ordered.length
+  };
+}
 export function initialState(demo = false) {
   const s = { users: [], listings: [], conversations: [], messages: [], claims: [], reports: [], saved: [], notifications: [] };
   if (!demo) return s;
@@ -21,7 +48,7 @@ export function initialState(demo = false) {
   s.listings = entries.map((e, i) => ({ id: `sample-${i+1}`, type: e[0], title: e[1], description: e[2], category: e[3], location: e[4], price: e[5], art: e[6], ownerId: e[7], status: 'active', condition: 'Good', negotiable: true, images: [], date: new Date().toISOString().slice(0,10), createdAt: new Date(Date.now() - i*3600000).toISOString(), demo: true }));
   return s;
 }
-export async function execute(s, { method, path, body = {}, user }) {
+export async function execute(s, { method, path, body = {}, query = {}, user }) {
   requireThat(user, 401, 'Sign in to continue.');
   const now = () => new Date().toISOString();
   const notify = (userId, message) => s.notifications.push({ id: randomUUID(), userId, message, read: false, createdAt: now() });
@@ -34,6 +61,33 @@ export async function execute(s, { method, path, body = {}, user }) {
     const m = { id: randomUUID(), conversationId: c.id, senderId: user.id, text: value, createdAt };
     s.messages.push(m); return m;
   };
+  if (method === 'GET' && path === '/api/me') return { ...safeUser(user), email: user.email };
+  if (method === 'GET' && path === '/api/listings') {
+    const { type, category, location, status } = query;
+    if (type !== undefined) requireThat(['lost', 'found', 'sale'].includes(type), 400, 'Invalid listing type.');
+    if (category !== undefined) requireThat(categories.includes(category), 400, 'Invalid category.');
+    if (location !== undefined) requireThat(locations.includes(location), 400, 'Invalid location.');
+    if (status !== undefined) requireThat(['active', 'reserved', 'sold', 'returned'].includes(status), 400, 'Invalid listing status.');
+    const sort = query.sort || 'newest';
+    requireThat(['newest', 'oldest', 'price-asc', 'price-desc'].includes(sort), 400, 'Invalid sort order.');
+    const q = query.q === undefined ? '' : text(query.q, 0, 100, 'Search').toLowerCase();
+    const rows = s.listings.filter(l => !l.removed && (!type || l.type === type) && (!category || l.category === category) && (!location || l.location === location) && (!status || l.status === status) && (!q || `${l.title} ${l.description}`.toLowerCase().includes(q)));
+    const priced = sort.startsWith('price-');
+    return pageRows(rows, query, JSON.stringify({ type, category, location, status, q, sort }), l => priced ? [Number(l.price || 0), l.createdAt, l.id] : [l.createdAt, l.id], sort === 'price-asc' ? [1, -1, -1] : sort === 'price-desc' ? [-1, -1, -1] : sort === 'oldest' ? [1, 1] : [-1, -1]);
+  }
+  let readMatch = path.match(/^\/api\/listings\/([^/]+)$/);
+  if (method === 'GET' && readMatch) return listing(readMatch[1]);
+  if (method === 'GET' && path === '/api/me/saved-listings') {
+    const ids = new Set(s.saved.filter(x => x.userId === user.id).map(x => x.listingId));
+    return pageRows(s.listings.filter(l => ids.has(l.id) && !l.removed), query, `saved:${user.id}`, l => [l.createdAt, l.id], [-1, -1]);
+  }
+  if (method === 'GET' && path === '/api/conversations') return pageRows(s.conversations.filter(c => c.members.includes(user.id)), query, `conversations:${user.id}`, c => [c.lastMessageAt || c.createdAt, c.id], [-1, -1]);
+  readMatch = path.match(/^\/api\/conversations\/([^/]+)\/messages$/);
+  if (method === 'GET' && readMatch) {
+    const c = conversation(readMatch[1]);
+    return pageRows(s.messages.filter(m => m.conversationId === c.id), query, `messages:${user.id}:${c.id}`, m => [m.createdAt, m.id], [-1, -1], true);
+  }
+  if (method === 'GET' && path === '/api/notifications') return pageRows(s.notifications.filter(n => n.userId === user.id), query, `notifications:${user.id}`, n => [n.createdAt, n.id], [-1, -1]);
   if (method === 'GET' && path === '/api/state') return {
     user: safeUser(user), users: s.users.map(safeUser), listings: s.listings.filter(x => !x.removed),
     saved: s.saved.filter(x => x.userId === user.id).map(x => x.listingId),
