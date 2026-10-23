@@ -53,6 +53,8 @@
         "lambda:GetFunction",
         "lambda:GetFunctionConfiguration",
         "lambda:GetPolicy",
+        "lambda:AddPermission",
+        "lambda:RemovePermission",
         "lambda:UpdateFunctionCode",
         "lambda:UpdateFunctionConfiguration",
         "lambda:ListTags",
@@ -60,6 +62,12 @@
         "lambda:UntagResource"
       ],
       "Resource": "arn:aws:lambda:ap-south-1:159596244653:function:vitfinds-*"
+    },
+    {
+      "Sid": "UpdateExistingVITFindsHttpApi",
+      "Effect": "Allow",
+      "Action": ["apigateway:GET", "apigateway:PUT", "apigateway:PATCH"],
+      "Resource": "arn:aws:apigateway:ap-south-1::/apis/nfsm44oc4b"
     },
     {
       "Sid": "ReadAndPassVITFindsLambdaRoles",

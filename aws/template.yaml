@@ -319,6 +319,14 @@ Resources:
               Action: s3:PutObject
               Resource: !Sub '${SiteBucket.Arn}/uploads/*'
       Events:
+        PreflightRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: '/api/{proxy+}'
+            Method: OPTIONS
+            Auth:
+              Authorizer: NONE
         ApiRoute:
           Type: HttpApi
           Properties:

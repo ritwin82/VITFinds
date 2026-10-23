@@ -1043,6 +1043,7 @@ $('#modal').addEventListener('click', e => {
 /* ---------- Boot ---------- */
 async function boot() {
   if (openedAsFile) return serverHelp();
+  if (!demo && !authToken) return auth();
   try {
     state = await api('/state');
     view = viewFromHash();
@@ -1063,6 +1064,10 @@ boot();
 /* ---------- Server not running: instructions + sample-data preview ---------- */
 function serverHelp() {
   state = null; preview = false;
+  if (!demo) {
+    $('#app').innerHTML = `<div class="boot"><span class="logo-mark" aria-hidden="true">V</span><h1>We couldn’t connect to VITFinds.</h1><p>Please check your connection and try again.</p><button class="btn btn-primary" onclick="location.reload()">Try again</button><button class="link-btn" data-action="auth" data-id="login">Back to sign in</button></div>`;
+    return;
+  }
   $('#app').innerHTML = `<div class="setup">
     <div class="setup-card">
       <a class="logo"><span class="logo-mark" aria-hidden="true">V</span><span>VIT<em>Finds</em><b>.</b></span></a>

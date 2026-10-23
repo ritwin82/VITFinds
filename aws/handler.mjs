@@ -48,6 +48,8 @@ async function save(before, after) {
 }
 export async function handler(event) {
   const response = (statusCode, data) => ({ statusCode, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }, body: JSON.stringify(data) });
+  // Browsers send preflight requests without the user's JWT.
+  if (event.requestContext?.http?.method === 'OPTIONS') return { statusCode: 204, body: '' };
   try {
     const claims = event.requestContext?.authorizer?.jwt?.claims;
     const allowedDomains = (process.env.UNIVERSITY_DOMAINS || 'vitstudent.ac.in').split(',').map(x=>x.trim());
