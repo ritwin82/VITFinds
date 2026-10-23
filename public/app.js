@@ -745,7 +745,7 @@ function account() {
 }
 
 /* ---------- Auth ---------- */
-function auth(mode = 'login') {
+function auth(mode = 'login', email = $('#auth-form [name="email"]')?.value || '') {
   const titles = { login: 'Welcome <em>back.</em>', signup: 'Join your <em>campus.</em>', verify: 'Check your <em>inbox.</em>', forgot: 'Let’s get you <em>back in.</em>', reset: 'Choose a new <em>password.</em>' };
   const button = { login: 'Sign in', signup: 'Create account', verify: 'Verify email', forgot: 'Send reset code', reset: 'Reset password' }[mode];
   $('#app').innerHTML = `<div class="auth">
@@ -766,10 +766,10 @@ function auth(mode = 'login') {
       <div class="auth-card">
         <p class="eyebrow">For VIT students</p>
         <h2>${titles[mode]}</h2>
-        <p class="muted">Use your university email to find, return, and pass things on.</p>
+        <p class="muted">${mode === 'verify' ? 'Enter the code from your university email. Check Spam/Junk too. If it hasn’t arrived, request a new code below.' : 'Use your university email to find, return, and pass things on.'}</p>
         <form id="auth-form" data-mode="${mode}">
           ${mode === 'signup' ? '<label>Full name<input name="name" required minlength="2" maxlength="60" autocomplete="name"></label>' : ''}
-          <label>University email<input name="email" type="email" required autocomplete="username" placeholder="you@vitstudent.ac.in"></label>
+          <label>University email<input name="email" type="email" required autocomplete="username" placeholder="you@vitstudent.ac.in" value="${esc(email)}"></label>
           ${['login', 'signup', 'reset'].includes(mode) ? `<label>Password<input name="password" type="password" required minlength="10" maxlength="128" autocomplete="${mode === 'login' ? 'current-password' : 'new-password'}">${mode !== 'login' ? '<small>10+ characters with uppercase, lowercase, a number, and a symbol.</small>' : ''}</label>` : ''}
           ${['verify', 'reset'].includes(mode) ? '<label>Verification code<input name="code" required inputmode="numeric" autocomplete="one-time-code"></label>' : ''}
           <p class="form-error" role="alert"></p>
@@ -778,6 +778,7 @@ function auth(mode = 'login') {
         <div class="auth-links">
           <button class="link-btn" data-action="auth" data-id="${mode === 'login' ? 'signup' : 'login'}">${mode === 'login' ? 'New here? Create an account' : 'Back to sign in'}</button>
           ${!demo && mode === 'login' ? '<button class="link-btn" data-action="auth" data-id="forgot">Forgot password?</button><button class="link-btn" data-action="auth" data-id="verify">Verify email</button>' : ''}
+          ${!demo && mode === 'verify' ? '<button class="link-btn" data-action="resend-code">Resend verification code</button>' : ''}
         </div>
         ${demo && ['login', 'signup'].includes(mode) ? `<div class="or"><span>or</span></div><button class="btn btn-outline full" data-action="demo-account" data-id="demo-me">Explore with a demo account</button>` : ''}
       </div>
@@ -792,7 +793,11 @@ async function cognito(action, body) {
     body: JSON.stringify(body)
   });
   const data = await res.json();
-  if (!res.ok) throw new Error(data.message || 'Unable to sign in.');
+  if (!res.ok) {
+    const error = new Error(data.message || 'Unable to sign in.');
+    error.code = (data.__type || '').split('#').pop();
+    throw error;
+  }
   return data;
 }
 
@@ -917,6 +922,23 @@ document.addEventListener('click', async e => {
         break;
       }
       case 'auth': auth(id); break;
+      case 'resend-code': {
+        const email = $('#auth-form [name="email"]');
+        if (!email?.reportValidity()) break;
+        const error = $('#auth-form .form-error');
+        if (error) error.textContent = '';
+        b.disabled = true;
+        try {
+          await cognito('ResendConfirmationCode', { ClientId: config.userPoolClientId, Username: email.value.toLowerCase().trim() });
+          toast('A new code was requested. Check your university Inbox and Spam/Junk folders.');
+          b.textContent = 'Code requested — retry in 30 seconds';
+          setTimeout(() => { b.disabled = false; b.textContent = 'Resend verification code'; }, 30000);
+        } catch (err) {
+          b.disabled = false;
+          if (error) error.textContent = err.message;
+        }
+        break;
+      }
       case 'preview': preview = true; state = previewState(); view = viewFromHash(); render(); toast(PREVIEW_NOTE); break;
     }
   } catch (err) { toast(err.message); }
@@ -1009,7 +1031,7 @@ document.addEventListener('submit', async e => {
         const base = { ClientId: config.userPoolClientId, Username: data.email.toLowerCase().trim() };
         if (mode === 'signup') {
           await cognito('SignUp', { ...base, Password: data.password, UserAttributes: [{ Name: 'name', Value: data.name }, { Name: 'email', Value: base.Username }] });
-          auth('verify'); toast('Verification code sent to your university email.');
+          auth('verify', base.Username); toast('Check your university email for the verification code.');
         } else if (mode === 'verify') {
           await cognito('ConfirmSignUp', { ...base, ConfirmationCode: data.code });
           auth(); toast('Email verified. You can sign in now.');
@@ -1028,6 +1050,11 @@ document.addEventListener('submit', async e => {
       }
     }
   } catch (err) {
+    if (formId === 'auth-form' && err.code === 'UserNotConfirmedException') {
+      auth('verify', data.email);
+      $('#auth-form .form-error').textContent = 'Your email isn’t verified yet. Enter your code or select “Resend verification code”.';
+      return;
+    }
     if (error) error.textContent = err.message; else toast(err.message);
   } finally {
     if (submit) submit.disabled = false;
