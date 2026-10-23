@@ -12,9 +12,11 @@ repository ID, so a renamed or recreated repository will require a review.
 `github-deploy-policy.json` permits deployment to the existing `vitfinds`
 CloudFormation stack, uploads to its SAM artifact and website buckets, updates
 to existing VITFinds Lambda functions, and invalidation of its CloudFront
-distribution. It does not permit deleting the stack or provisioning new AWS
-services. Review and extend it when an infrastructure change needs additional
-resources or actions.
+distribution. It also permits updating the existing Cognito user pool, managing
+the stack's SES authentication-email configuration set and event destination,
+and creating Cognito's dedicated email service-linked role. It does not permit
+deleting the stack. Review and extend it when an infrastructure change needs
+additional resources or actions.
 
 The deployment job in `.github/workflows/deploy.yml` assumes the role with:
 
