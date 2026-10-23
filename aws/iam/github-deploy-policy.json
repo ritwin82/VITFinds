@@ -70,6 +70,12 @@
       "Resource": "arn:aws:apigateway:ap-south-1::/apis/nfsm44oc4b"
     },
     {
+      "Sid": "ReadExistingVITFindsUserPool",
+      "Effect": "Allow",
+      "Action": "cognito-idp:DescribeUserPool",
+      "Resource": "arn:aws:cognito-idp:ap-south-1:159596244653:userpool/ap-south-1_6aaHJkJ08"
+    },
+    {
       "Sid": "ReadAndPassVITFindsLambdaRoles",
       "Effect": "Allow",
       "Action": ["iam:GetRole", "iam:PassRole"],
