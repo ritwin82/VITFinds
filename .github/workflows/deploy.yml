@@ -55,7 +55,8 @@ jobs:
       - name: Build and deploy backend
         run: |
           npm run build
-          sam deploy --template-file aws/template.yaml --config-file samconfig.toml --no-confirm-changeset --no-fail-on-empty-changeset
+          cd aws
+          sam deploy --template-file template.yaml --config-file samconfig.toml --no-confirm-changeset --no-fail-on-empty-changeset
       - name: Configure and upload frontend
         run: |
           node scripts/configure-aws.mjs vitfinds ap-south-1
