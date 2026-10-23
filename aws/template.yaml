@@ -24,7 +24,9 @@ Rules:
           - !And [!Not [!Equals [!Ref SesSourceArn, '']], !Not [!Equals [!Ref SesFromAddress, '']]]
         AssertDescription: Set both SES parameters, or leave both empty to use Cognito email.
 Conditions:
-  UseSesEmail: !Not [!Equals [!Ref SesSourceArn, '']]
+  UseSesEmail: !And
+    - !Not [!Equals [!Ref SesSourceArn, '']]
+    - !Not [!Equals [!Ref SesFromAddress, '']]
 Resources:
   SiteBucket:
     Type: AWS::S3::Bucket
