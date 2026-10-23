@@ -1,0 +1,85 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "UpdateVITFindsStack",
+      "Effect": "Allow",
+      "Action": [
+        "cloudformation:CreateChangeSet",
+        "cloudformation:DescribeChangeSet",
+        "cloudformation:ExecuteChangeSet",
+        "cloudformation:DeleteChangeSet",
+        "cloudformation:DescribeStacks",
+        "cloudformation:DescribeStackEvents",
+        "cloudformation:DescribeStackResources",
+        "cloudformation:ListStackResources",
+        "cloudformation:GetTemplate",
+        "cloudformation:GetTemplateSummary"
+      ],
+      "Resource": [
+        "arn:aws:cloudformation:ap-south-1:159596244653:stack/vitfinds/*",
+        "arn:aws:cloudformation:ap-south-1:159596244653:changeSet/samcli-deploy*/*"
+      ]
+    },
+    {
+      "Sid": "ValidateTemplate",
+      "Effect": "Allow",
+      "Action": "cloudformation:ValidateTemplate",
+      "Resource": "*"
+    },
+    {
+      "Sid": "ListVITFindsBuckets",
+      "Effect": "Allow",
+      "Action": ["s3:ListBucket", "s3:GetBucketLocation"],
+      "Resource": [
+        "arn:aws:s3:::aws-sam-cli-managed-default-samclisourcebucket-ztslgm3kwfwm",
+        "arn:aws:s3:::vitfinds-sitebucket-uc93v8vdca2k"
+      ]
+    },
+    {
+      "Sid": "ManageVITFindsObjects",
+      "Effect": "Allow",
+      "Action": ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"],
+      "Resource": [
+        "arn:aws:s3:::aws-sam-cli-managed-default-samclisourcebucket-ztslgm3kwfwm/*",
+        "arn:aws:s3:::vitfinds-sitebucket-uc93v8vdca2k/*"
+      ]
+    },
+    {
+      "Sid": "UpdateExistingVITFindsFunctions",
+      "Effect": "Allow",
+      "Action": [
+        "lambda:GetFunction",
+        "lambda:GetFunctionConfiguration",
+        "lambda:GetPolicy",
+        "lambda:UpdateFunctionCode",
+        "lambda:UpdateFunctionConfiguration",
+        "lambda:ListTags",
+        "lambda:TagResource",
+        "lambda:UntagResource"
+      ],
+      "Resource": "arn:aws:lambda:ap-south-1:159596244653:function:vitfinds-*"
+    },
+    {
+      "Sid": "ReadAndPassVITFindsLambdaRoles",
+      "Effect": "Allow",
+      "Action": ["iam:GetRole", "iam:PassRole"],
+      "Resource": "arn:aws:iam::159596244653:role/vitfinds-*",
+      "Condition": {
+        "StringEqualsIfExists": {
+          "iam:PassedToService": "lambda.amazonaws.com"
+        }
+      }
+    },
+    {
+      "Sid": "InvalidateVITFindsDistribution",
+      "Effect": "Allow",
+      "Action": [
+        "cloudfront:CreateInvalidation",
+        "cloudfront:GetInvalidation",
+        "cloudfront:GetDistribution"
+      ],
+      "Resource": "arn:aws:cloudfront::159596244653:distribution/E12YZX73I7AZAB"
+    }
+  ]
+}
