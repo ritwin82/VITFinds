@@ -18,7 +18,8 @@
       ],
       "Resource": [
         "arn:aws:cloudformation:ap-south-1:159596244653:stack/vitfinds/*",
-        "arn:aws:cloudformation:ap-south-1:159596244653:changeSet/samcli-deploy*/*"
+        "arn:aws:cloudformation:ap-south-1:159596244653:changeSet/samcli-deploy*/*",
+        "arn:aws:cloudformation:ap-south-1:aws:transform/Serverless-2016-10-31"
       ]
     },
     {
