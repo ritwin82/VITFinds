@@ -16,11 +16,15 @@ const locations = ['SJT', 'TT', 'Main Library', 'Foodys', 'Mens Hostel', 'Ladies
 const VIEWS = ['home', 'all', 'lost', 'found', 'sale', 'saved', 'mine', 'messages', 'activity', 'admin'];
 const ALL_CATEGORIES = 'All categories';
 const ANYWHERE = 'Anywhere on campus';
-const art = { headphones: '🎧', books: '📚', backpack: '🎒', cycle: '🚲', keys: '🔑', lamp: '💡' };
-const categoryEmoji = { 'Electronics': '🎧', 'Books & stationery': '📚', 'ID & essentials': '🪪', 'Clothing': '🧥', 'Cycles & sports': '🚲', 'Hostel essentials': '🛏️', 'Other': '📦' };
+// Free Pexels photography is bundled locally; sources are in images/CREDITS.md.
+const samplePhotos = Object.fromEntries(['headphones', 'books', 'backpack', 'cycle', 'keys', 'lamp'].map(name => [name, `images/${name}.jpg`]));
+const categoryIcons = { 'Electronics': 'headphones', 'Books & stationery': 'book', 'ID & essentials': 'user', 'Clothing': 'tag', 'Cycles & sports': 'cycle', 'Hostel essentials': 'box', 'Other': 'box' };
 
 /* ---------- Icons ---------- */
 const paths = {
+  headphones: '<path d="M4 14v-3a8 8 0 0 1 16 0v3"/><rect x="3" y="12" width="4" height="8" rx="2"/><rect x="17" y="12" width="4" height="8" rx="2"/>',
+  book: '<path d="M12 5c-3-2-6-2-10-1v15c4-1 7-1 10 1 3-2 6-2 10-1V4c-4-1-7-1-10 1v15"/>',
+  cycle: '<circle cx="5" cy="16" r="4"/><circle cx="19" cy="16" r="4"/><path d="m5 16 5-9 5 9H5M8 7h4M16 4h3l-4 12"/>',
   search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
   pin: '<path d="M12 21s-7-6.2-7-11a7 7 0 0 1 14 0c0 4.8-7 11-7 11z"/><circle cx="12" cy="10" r="2.5"/>',
   calendar: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/>',
@@ -236,8 +240,8 @@ function matchesFor(l) {
 
 function photo(item, cls = '') {
   if (item.images?.length) return `<img class="photo ${cls}" src="${esc(imageUrl(item.images[0]))}" alt="${esc(item.title)}" loading="lazy">`;
-  const emoji = art[item.art] || categoryEmoji[item.category] || '📦';
-  return `<div class="photo art art-${esc(item.type)} ${cls}" role="img" aria-label="${item.demo ? 'Sample item illustration' : 'No photo uploaded'}"><span>${emoji}</span></div>`;
+  if (item.demo && samplePhotos[item.art]) return `<span class="photo-frame ${cls}"><img class="photo" src="${samplePhotos[item.art]}" alt="Example photo for ${esc(item.title)}" loading="lazy" width="900" height="675"><span class="sample-photo-label">Example photo</span></span>`;
+  return `<div class="photo photo-empty ${cls}">${icon('camera')}<span>No photo uploaded</span></div>`;
 }
 
 function go(next) {
@@ -373,7 +377,7 @@ function home() {
       </form>
       <div class="quick">
         <span>Popular:</span>
-        ${['ID & essentials', 'Electronics', 'Books & stationery', 'Cycles & sports'].map(c => `<button class="chip" data-action="quick-category" data-id="${esc(c)}">${categoryEmoji[c]} ${esc(c)}</button>`).join('')}
+        ${['ID & essentials', 'Electronics', 'Books & stationery', 'Cycles & sports'].map(c => `<button class="chip" data-action="quick-category" data-id="${esc(c)}">${icon(categoryIcons[c])} ${esc(c)}</button>`).join('')}
       </div>
     </div>
     <div class="hero-visual">${heroStack()}</div>
@@ -426,7 +430,7 @@ function home() {
         <h3>Claim privately, meet safely</h3>
         <p>Describe a detail only the owner would know. The finder reviews it, you chat in-app, and meet at a public spot.</p>
         <div class="mock mock-chat">
-          <span class="bubble in">It has a sticker of a cat on the left cup 🐱</span>
+          <span class="bubble in">It has a sticker of a cat on the left cup</span>
           <span class="bubble out">That’s it! Foodys at 5?</span>
           <span class="mock-status">${icon('check')} Claim accepted · Returned</span>
         </div>
@@ -466,7 +470,7 @@ function heroItems() {
 function heroStack() {
   const items = heroItems();
   if (!items.length) {
-    return `<div class="stack"><div class="stack-card pos-0 placeholder"><div class="photo art art-found"><span>🔎</span></div><div class="stack-body"><span class="badge badge-found">Found</span><h3>The first find shows up here</h3><p>Post something you found and it will appear on this board.</p></div></div></div>`;
+    return `<div class="stack"><div class="stack-card pos-0 placeholder"><div class="photo art art-found">${icon('search')}</div><div class="stack-body"><span class="badge badge-found">Found</span><h3>The first find shows up here</h3><p>Post something you found and it will appear on this board.</p></div></div></div>`;
   }
   heroIndex = ((heroIndex % items.length) + items.length) % items.length;
   const ordered = items.map((_, i) => items[(heroIndex + i) % items.length]).slice(0, 3);
@@ -756,7 +760,7 @@ function auth(mode = 'login') {
           <li>${icon('tag')} Buy and sell with students nearby</li>
         </ul>
       </div>
-      <div class="auth-float" aria-hidden="true"><span class="badge badge-found">Found</span><b>🎧 Black headphones</b><small>Main Library · 2h ago</small></div>
+      <div class="auth-float" aria-hidden="true"><span class="badge badge-found">Found</span><b>${icon('headphones')} Black headphones</b><small>Main Library · 2h ago</small></div>
     </aside>
     <section class="auth-main">
       <div class="auth-card">
