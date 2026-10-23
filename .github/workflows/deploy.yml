@@ -56,7 +56,16 @@ jobs:
         run: |
           npm run build
           cd aws
-          sam deploy --template-file template.yaml --config-file samconfig.toml --no-confirm-changeset --no-fail-on-empty-changeset
+          sam deploy \
+            --template-file template.yaml \
+            --stack-name vitfinds \
+            --region ap-south-1 \
+            --s3-bucket aws-sam-cli-managed-default-samclisourcebucket-ztslgm3kwfwm \
+            --s3-prefix vitfinds \
+            --capabilities CAPABILITY_IAM \
+            --parameter-overrides UniversityDomains=vitstudent.ac.in \
+            --no-confirm-changeset \
+            --no-fail-on-empty-changeset
       - name: Configure and upload frontend
         run: |
           node scripts/configure-aws.mjs vitfinds ap-south-1
