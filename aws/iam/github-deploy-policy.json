@@ -72,8 +72,30 @@
     {
       "Sid": "ReadExistingVITFindsUserPool",
       "Effect": "Allow",
-      "Action": "cognito-idp:DescribeUserPool",
+      "Action": ["cognito-idp:DescribeUserPool", "cognito-idp:UpdateUserPool"],
       "Resource": "arn:aws:cognito-idp:ap-south-1:159596244653:userpool/ap-south-1_6aaHJkJ08"
+    },
+    {
+      "Sid": "ManageVITFindsEmailMetrics",
+      "Effect": "Allow",
+      "Action": [
+        "ses:CreateConfigurationSet",
+        "ses:DescribeConfigurationSet",
+        "ses:GetConfigurationSet",
+        "ses:DeleteConfigurationSet",
+        "ses:CreateConfigurationSetEventDestination",
+        "ses:UpdateConfigurationSetEventDestination",
+        "ses:DeleteConfigurationSetEventDestination",
+        "ses:GetConfigurationSetEventDestinations"
+      ],
+      "Resource": "arn:aws:ses:ap-south-1:159596244653:configuration-set/vitfinds-auth-email"
+    },
+    {
+      "Sid": "CreateCognitoEmailServiceRole",
+      "Effect": "Allow",
+      "Action": "iam:CreateServiceLinkedRole",
+      "Resource": "arn:aws:iam::159596244653:role/aws-service-role/email.cognito-idp.amazonaws.com/AWSServiceRoleForAmazonCognitoIdpEmailService",
+      "Condition": { "StringEquals": { "iam:AWSServiceName": "email.cognito-idp.amazonaws.com" } }
     },
     {
       "Sid": "ReadAndPassVITFindsLambdaRoles",

@@ -6,6 +6,25 @@ Parameters:
     Type: String
     Default: vitstudent.ac.in
     Description: Comma-separated approved university email domains
+  SesSourceArn:
+    Type: String
+    Default: ''
+    AllowedPattern: '^$|^arn:aws:ses:[a-z0-9-]+:[0-9]{12}:identity/.+$'
+    Description: Verified SES identity ARN; enable only after SES production approval
+  SesFromAddress:
+    Type: String
+    Default: ''
+    AllowedPattern: '^$|^[A-Za-z0-9._+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$'
+    Description: Email address covered by the verified SES identity
+Rules:
+  CompleteSesConfiguration:
+    Assertions:
+      - Assert: !Or
+          - !And [!Equals [!Ref SesSourceArn, ''], !Equals [!Ref SesFromAddress, '']]
+          - !And [!Not [!Equals [!Ref SesSourceArn, '']], !Not [!Equals [!Ref SesFromAddress, '']]]
+        AssertDescription: Set both SES parameters, or leave both empty to use Cognito email.
+Conditions:
+  UseSesEmail: !Not [!Equals [!Ref SesSourceArn, '']]
 Resources:
   SiteBucket:
     Type: AWS::S3::Bucket
@@ -220,6 +239,14 @@ Resources:
     Properties:
       UsernameAttributes: [email]
       AutoVerifiedAttributes: [email]
+      EmailConfiguration: !If
+        - UseSesEmail
+        - EmailSendingAccount: DEVELOPER
+          SourceArn: !Ref SesSourceArn
+          From: !Sub 'VITFinds <${SesFromAddress}>'
+          ReplyToEmailAddress: !Ref SesFromAddress
+          ConfigurationSet: !Ref AuthEmailConfigurationSet
+        - !Ref AWS::NoValue
       UsernameConfiguration:
         CaseSensitive: false
       Policies:
@@ -249,6 +276,25 @@ Resources:
       Action: lambda:InvokeFunction
       Principal: cognito-idp.amazonaws.com
       SourceArn: !GetAtt Students.Arn
+  AuthEmailConfigurationSet:
+    Type: AWS::SES::ConfigurationSet
+    Condition: UseSesEmail
+    Properties:
+      Name: !Sub '${AWS::StackName}-auth-email'
+  AuthEmailMetrics:
+    Type: AWS::SES::ConfigurationSetEventDestination
+    Condition: UseSesEmail
+    Properties:
+      ConfigurationSetName: !Ref AuthEmailConfigurationSet
+      EventDestination:
+        Name: DeliveryMetrics
+        Enabled: true
+        MatchingEventTypes: [send, reject, bounce, complaint, delivery, deliveryDelay, renderingFailure]
+        CloudWatchDestination:
+          DimensionConfigurations:
+            - DimensionName: application
+              DimensionValueSource: messageTag
+              DefaultDimensionValue: !Ref AWS::StackName
   StudentClient:
     Type: AWS::Cognito::UserPoolClient
     Properties:
