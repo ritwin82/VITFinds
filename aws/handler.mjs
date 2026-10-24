@@ -52,8 +52,8 @@ export async function handler(event) {
   if (event.requestContext?.http?.method === 'OPTIONS') return { statusCode: 204, body: '' };
   try {
     const claims = event.requestContext?.authorizer?.jwt?.claims;
-    const allowedDomains = (process.env.UNIVERSITY_DOMAINS || 'vitstudent.ac.in').split(',').map(x=>x.trim());
-    if (!claims?.sub || ![true, 'true'].includes(claims.email_verified) || !allowedDomains.includes(claims.email?.split('@')[1])) throw new AppError(403, 'A verified university account is required.');
+    const allowedDomains = (process.env.UNIVERSITY_DOMAINS || 'gmail.com').split(',').map(x=>x.trim());
+    if (!claims?.sub || ![true, 'true'].includes(claims.email_verified) || !allowedDomains.includes(claims.email?.split('@')[1])) throw new AppError(403, 'A verified Gmail account is required.');
     let body = {}; try { body = event.body ? JSON.parse(event.isBase64Encoded ? Buffer.from(event.body, 'base64').toString() : event.body) : {}; } catch { throw new AppError(400, 'Invalid request.'); }
     const path = event.rawPath, method = event.requestContext.http.method, query = event.queryStringParameters || {};
     if (path === '/api/realtime-ticket' && method === 'POST') {

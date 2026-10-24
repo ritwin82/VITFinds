@@ -277,7 +277,7 @@ function header() {
         <div class="user-wrap">
           <button class="avatar-btn" data-action="user-menu" aria-haspopup="menu" aria-expanded="false" aria-label="Account menu">${esc(initials(state.user.name))}</button>
           <div class="user-menu" id="user-menu" role="menu" hidden>
-            <div class="user-menu-head"><strong>${esc(state.user.name)}</strong><small>${demo ? (state.user.id.startsWith('demo-') ? 'Demo account' : 'Local account') : 'Verified student'} · VIT Vellore</small></div>
+            <div class="user-menu-head"><strong>${esc(state.user.name)}</strong><small>${demo ? (state.user.id.startsWith('demo-') ? 'Demo account' : 'Local account') : 'Email verified'} · VIT Vellore</small></div>
             <a role="menuitem" href="#/saved" data-nav>${icon('heart')} Saved items <span class="count">${state.saved.length}</span></a>
             <a role="menuitem" href="#/mine" data-nav>${icon('box')} My listings</a>
             <a role="menuitem" href="#/messages" data-nav>${icon('chat')} Messages <span class="count">${state.conversations.length}</span></a>
@@ -493,7 +493,7 @@ function heroStack() {
 
 function faqs() {
   return [
-    ['Who can use VITFinds?', 'Any VIT student with an approved university email address. Everyone you talk to here is part of the campus community.'],
+    ['Who can use VITFinds?', 'You can create an account with a Gmail address. Verify your email before posting, claiming items, or messaging. VITFinds is designed for the campus community.'],
     ['How do I claim something someone found?', 'Open the listing and choose <b>This is mine</b>. Describe a private detail, a mark, or what’s inside. Only the finder sees your claim, and they confirm once it has been handed back.'],
     ['I found something. What should I post?', 'A clear title, a photo, where and when you found it. Keep one identifying detail (a sticker, a wallpaper, the contents) out of the post so you can check claims.'],
     ['Is my phone number shared?', 'No. Conversations stay inside VITFinds. Agree on a public spot like Foodys, the library, or the main gate to hand things over.'],
@@ -663,7 +663,7 @@ function detail(id) {
       ${l.type === 'sale' ? `<p class="detail-price">${currency(l.price)} <small>${esc(l.condition)}${l.negotiable ? ' · Open to offers' : ''}</small></p>` : ''}
       <div class="meta-row"><span>${icon('pin')} ${placeVerb(l.type)} ${esc(l.location)}</span><span>${icon('calendar')} ${niceDate(l.date)}</span><span>${icon('clock')} Posted ${ago(l.createdAt)}</span></div>
       <p class="description">${esc(l.description)}</p>
-      <div class="owner"><span class="avatar">${esc(initials(userName(l.ownerId)))}</span><div><strong>${esc(userName(l.ownerId))}${isOwner ? ' (you)' : ''}</strong><small>${l.demo ? 'Sample student' : owner?.verified ? `${icon('shield')} Verified student` : 'Student'}</small></div></div>
+      <div class="owner"><span class="avatar">${esc(initials(userName(l.ownerId)))}</span><div><strong>${esc(userName(l.ownerId))}${isOwner ? ' (you)' : ''}</strong><small>${l.demo ? 'Sample student' : owner?.verified ? `${icon('shield')} Email verified` : 'Student'}</small></div></div>
       ${actions}
       ${claims.length ? `<h3 class="sub">Ownership claims</h3>${claims.map(c => `<div class="claim"><div class="claim-top"><strong>${esc(userName(c.userId))}</strong><span class="status status-${esc(c.status)}">${esc(c.status)}</span></div><p>${esc(c.proof)}</p>${isOwner && c.status === 'pending' && l.status === 'active' ? `<div class="btn-row"><button class="btn btn-primary btn-sm" data-action="claim-review" data-id="${esc(c.id)}" data-value="accepted">${icon('check')} Confirm returned</button><button class="btn btn-outline btn-sm" data-action="claim-review" data-id="${esc(c.id)}" data-value="rejected">Decline</button></div>` : ''}</div>`).join('')}` : ''}
       ${matches.length ? `<h3 class="sub">${icon('sparkle')} Possible matches</h3><p class="fine">Same category, nearby places first. Ownership still needs to be checked.</p>${matches.map(x => `<button class="match-row" data-action="detail" data-id="${esc(x.id)}"><span class="match-thumb">${photo(x)}</span><span><strong>${esc(x.title)}</strong><small>${icon('pin')} ${esc(x.location)}</small></span>${icon('right')}</button>`).join('')}` : ''}
@@ -739,7 +739,7 @@ function account() {
     <h2>${esc(state.user.name)}</h2>
     ${demo ? `<p class="muted">These are local sample accounts. Switch between students to try messages, claims, and moderation.</p>
       <div class="accounts">${people.map(([id, name, desc]) => `<button class="${state.user.id === id ? 'on' : ''}" data-action="demo-account" data-id="${id}"><span class="avatar">${initials(name)}</span><span><strong>${name}</strong><small>${desc}</small></span>${state.user.id === id ? icon('check') : icon('right')}</button>`).join('')}</div>`
-      : '<p class="muted">Your university email has been verified.</p>'}
+      : '<p class="muted">Your Gmail address has been verified.</p>'}
     <button class="btn btn-outline full" data-action="logout">${icon('logout')} Sign out</button>
   </div>`);
 }
@@ -766,10 +766,10 @@ function auth(mode = 'login', email = $('#auth-form [name="email"]')?.value || '
       <div class="auth-card">
         <p class="eyebrow">For VIT students</p>
         <h2>${titles[mode]}</h2>
-        <p class="muted">${mode === 'verify' ? 'Enter the code from your university email. Check Spam/Junk too. If it hasn’t arrived, request a new code below.' : 'Use your university email to find, return, and pass things on.'}</p>
+        <p class="muted">${mode === 'verify' ? 'Enter the code sent to your Gmail inbox. Check Spam/Junk too. If it hasn’t arrived, request a new code below.' : 'Use your Gmail address to find, return, and pass things on.'}</p>
         <form id="auth-form" data-mode="${mode}">
           ${mode === 'signup' ? '<label>Full name<input name="name" required minlength="2" maxlength="60" autocomplete="name"></label>' : ''}
-          <label>University email<input name="email" type="email" required autocomplete="username" placeholder="you@vitstudent.ac.in" value="${esc(email)}"></label>
+          <label>Gmail address<input name="email" type="email" required autocomplete="username" placeholder="you@gmail.com" value="${esc(email)}"></label>
           ${['login', 'signup', 'reset'].includes(mode) ? `<label>Password<input name="password" type="password" required minlength="10" maxlength="128" autocomplete="${mode === 'login' ? 'current-password' : 'new-password'}">${mode !== 'login' ? '<small>10+ characters with uppercase, lowercase, a number, and a symbol.</small>' : ''}</label>` : ''}
           ${['verify', 'reset'].includes(mode) ? '<label>Verification code<input name="code" required inputmode="numeric" autocomplete="one-time-code"></label>' : ''}
           <p class="form-error" role="alert"></p>
@@ -930,7 +930,7 @@ document.addEventListener('click', async e => {
         b.disabled = true;
         try {
           await cognito('ResendConfirmationCode', { ClientId: config.userPoolClientId, Username: email.value.toLowerCase().trim() });
-          toast('A new code was requested. Check your university Inbox and Spam/Junk folders.');
+          toast('A new code was requested. Check your Gmail Inbox and Spam/Junk folders.');
           b.textContent = 'Code requested — retry in 30 seconds';
           setTimeout(() => { b.disabled = false; b.textContent = 'Resend verification code'; }, 30000);
         } catch (err) {
@@ -1031,7 +1031,7 @@ document.addEventListener('submit', async e => {
         const base = { ClientId: config.userPoolClientId, Username: data.email.toLowerCase().trim() };
         if (mode === 'signup') {
           await cognito('SignUp', { ...base, Password: data.password, UserAttributes: [{ Name: 'name', Value: data.name }, { Name: 'email', Value: base.Username }] });
-          auth('verify', base.Username); toast('Check your university email for the verification code.');
+          auth('verify', base.Username); toast('Check your Gmail inbox for the verification code.');
         } else if (mode === 'verify') {
           await cognito('ConfirmSignUp', { ...base, ConfirmationCode: data.code });
           auth(); toast('Email verified. You can sign in now.');

@@ -36,7 +36,7 @@ function pageRows(rows, query, scope, key, directions, newestFirst = false) {
 export function initialState(demo = false) {
   const s = { users: [], listings: [], conversations: [], messages: [], claims: [], reports: [], saved: [], notifications: [] };
   if (!demo) return s;
-  s.users = [{ id: 'demo-me', name: 'Alex Student', email: 'alex@vitstudent.ac.in', role: 'student', verified: false }, { id: 'demo-priya', name: 'Priya S.', email: 'priya@vitstudent.ac.in', role: 'student', verified: false }, { id: 'demo-arjun', name: 'Arjun R.', email: 'arjun@vitstudent.ac.in', role: 'student', verified: false }, { id: 'demo-admin', name: 'Campus moderator', email: 'admin@vitstudent.ac.in', role: 'admin', verified: false }];
+  s.users = [{ id: 'demo-me', name: 'Alex Student', email: 'alex@gmail.com', role: 'student', verified: false }, { id: 'demo-priya', name: 'Priya S.', email: 'priya@gmail.com', role: 'student', verified: false }, { id: 'demo-arjun', name: 'Arjun R.', email: 'arjun@gmail.com', role: 'student', verified: false }, { id: 'demo-admin', name: 'Campus moderator', email: 'admin@gmail.com', role: 'admin', verified: false }];
   const entries = [
     ['found', 'A little music, missing its person', 'Black wireless headphones found on the second floor of the library. Tell me the brand and a distinguishing detail to claim them.', 'Electronics', 'Main Library', 0, 'headphones', 'demo-priya'],
     ['sale', 'Your next semester, sorted', 'Engineering Mathematics textbook. Clean pages, a few useful pencil notes. Available for pickup near SJT.', 'Books & stationery', 'SJT', 350, 'books', 'demo-arjun'],

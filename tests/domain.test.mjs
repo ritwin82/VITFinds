@@ -30,7 +30,7 @@ test('listing discovery filters, sorts, and paginates without exposing removed l
 });
 test('focused account, saved, conversation, message, and notification reads respect ownership',async()=>{
  const {call}=setup();
- const me=await call('GET','/api/me');assert.equal(me.email,'alex@vitstudent.ac.in');assert.ok(!Object.hasOwn(me,'passwordHash'));
+ const me=await call('GET','/api/me');assert.equal(me.email,'alex@gmail.com');assert.ok(!Object.hasOwn(me,'passwordHash'));
  await call('POST','/api/listings/sample-2/save');
  assert.deepEqual((await call('GET','/api/me/saved-listings')).items.map(x=>x.id),['sample-2']);
  assert.equal((await call('GET','/api/me/saved-listings',{},'demo-priya')).total,0);
