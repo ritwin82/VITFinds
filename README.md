@@ -8,9 +8,9 @@ A student lost-and-found platform and campus marketplace. Includes a working loc
 node server.mjs
 ```
 
-Open http://127.0.0.1:3000. Create a local account with an approved university email and a strong password, or use the clearly labeled demo account shortcut. Use **Switch account** to try Alex, Priya, Arjun, or the campus moderator. The demo login must never be exposed on a public server.
+Open http://127.0.0.1:3000. Create a local account with a Gmail address and a strong password, or use the clearly labeled demo account shortcut. Use **Switch account** to try Alex, Priya, Arjun, or the campus moderator. The demo login must never be exposed on a public server.
 
-The backend saves changes in `.data/state.json`, photos in `.data/uploads/`, and a randomly generated JWT signing secret in `.data/jwt-secret`; all are ignored by Git. Passwords are hashed with Node.js `scrypt` and unique salts. Local JWTs use HS256 signatures, expire after 24 hours, are stored in browser session storage, and are revoked in memory on logout. Local accounts validate the university email domain but cannot prove ownership of that address because no email service is used. AWS mode uses Cognito email verification and never offers demo authentication or seeds sample records.
+The backend saves changes in `.data/state.json`, photos in `.data/uploads/`, and a randomly generated JWT signing secret in `.data/jwt-secret`; all are ignored by Git. Passwords are hashed with Node.js `scrypt` and unique salts. Local JWTs use HS256 signatures, expire after 24 hours, are stored in browser session storage, and are revoked in memory on logout. Local accounts validate the configured email domain but cannot prove ownership of that address because no email service is used. AWS mode uses Cognito email verification and never offers demo authentication or seeds sample records.
 
 ## Implemented
 
@@ -23,7 +23,7 @@ The backend saves changes in `.data/state.json`, photos in `.data/uploads/`, and
 - Private conversations, persistent messages, live delivery, unread counts, read receipts, and in-app notifications.
 - Reporting, moderator-only review, and removal of reported listings.
 - Responsive interface, native accessible dialogs, escaped student content, validation, ownership checks, and participant checks.
-- AWS university-email signup, confirmation, sign-in, password reset, and verified-email enforcement.
+- AWS Gmail signup, confirmation, sign-in, password reset, and verified-email enforcement.
 - Local signup and login with scrypt password hashing, signed JWT authentication, expiry checks, login throttling, and protected API routes.
 - Optional WebMCP search and saved-item tools, feature-detected. These are not tested in a live WebMCP browser.
 
@@ -66,7 +66,7 @@ sam validate --lint --template-file aws/template.yaml
 sam deploy --guided --template-file aws/template.yaml
 ```
 
-Choose a stack name such as `vitfinds`, a region such as `ap-south-1`, and the approved university email domain parameter. Review and approve the generated change set. After deployment, substitute your selected stack and region:
+Choose a stack name such as `vitfinds`, a region such as `ap-south-1`, and the allowed email-domain parameter (gmail.com). Review and approve the generated change set. After deployment, substitute your selected stack and region:
 
 ```powershell
 node scripts/configure-aws.mjs vitfinds ap-south-1
@@ -77,10 +77,10 @@ aws cloudfront create-invalidation --distribution-id YOUR_DISTRIBUTION_ID --path
 
 Use the actual `SiteBucket` and `DistributionId` outputs in the last two commands. `configure-aws.mjs` writes only public configuration, including `WebSocketUrl`, into `dist/config.js`; it does not store AWS credentials. Always run configuration **after** the build, because the build restores local demo configuration in `dist/`. Never deploy an unconfigured `dist/` build. The frontend SiteUrl is an HTTPS CloudFront URL.
 
-Create and verify a university student account through the deployed app. Assign a moderator explicitly through Cognito:
+Create and verify a Gmail account through the deployed app. Assign a moderator explicitly through Cognito:
 
 ```powershell
-aws cognito-idp admin-add-user-to-group --user-pool-id YOUR_USER_POOL_ID --username moderator@vitstudent.ac.in --group-name Admins --region ap-south-1
+aws cognito-idp admin-add-user-to-group --user-pool-id YOUR_USER_POOL_ID --username moderator@gmail.com --group-name Admins --region ap-south-1
 ```
 
 Sign out and back in to obtain the new group claim. Users cannot grant themselves admin access. Cognito's default email delivery is suitable for initial testing; configure SES delivery and quotas for a broader launch.

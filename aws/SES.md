@@ -2,7 +2,7 @@
 
 SES is regional. Use `ap-south-1` for this app. Verify the sending email identity in SES and obtain SES production access before enabling it in the live Cognito pool. The SES sandbox only permits sending to verified recipients, even when the sender is verified.
 
-The template's `SesSourceArn` and `SesFromAddress` parameters enable Cognito's `DEVELOPER` email mode. Both default to empty, which keeps Cognito's default sending service. Set both together. The existing user pool, accounts, and university-domain restriction are preserved. SES identity verification, account-level suppression, and the production-access review are account setup tasks outside this stack.
+The template's `SesSourceArn` and `SesFromAddress` parameters enable Cognito's `DEVELOPER` email mode. Both default to empty, which keeps Cognito's default sending service. Set both together. The existing user pool, accounts, and configured registration-domain restriction are preserved. SES identity verification, account-level suppression, and the production-access review are account setup tasks outside this stack.
 
 After AWS approves production access, run from PowerShell:
 

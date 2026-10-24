@@ -4,8 +4,8 @@ Description: VITFinds student lost and found and marketplace
 Parameters:
   UniversityDomains:
     Type: String
-    Default: vitstudent.ac.in
-    Description: Comma-separated approved university email domains
+    Default: gmail.com
+    Description: Comma-separated approved registration email domains
   SesSourceArn:
     Type: String
     Default: ''

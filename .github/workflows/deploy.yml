@@ -63,7 +63,7 @@ jobs:
             --s3-bucket aws-sam-cli-managed-default-samclisourcebucket-ztslgm3kwfwm \
             --s3-prefix vitfinds \
             --capabilities CAPABILITY_IAM \
-            --parameter-overrides UniversityDomains=vitstudent.ac.in \
+            --parameter-overrides UniversityDomains=gmail.com \
             --no-confirm-changeset \
             --no-fail-on-empty-changeset
       - name: Configure and upload frontend

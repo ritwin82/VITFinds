@@ -13,10 +13,10 @@ test('HTTP workflow: authentication, upload, listing, persistence, CSRF, logout'
    const request=(path,body,headers={})=>fetch(base+path,{method:body?'POST':'GET',headers:{'Content-Type':'application/json',...(token?{Authorization:`Bearer ${token}`} : {}),...headers},...(body?{body:JSON.stringify(body)}:{})});
    assert.equal((await request('/')).status,200);
    assert.equal((await request('/api/state')).status,401);
-   assert.equal((await request('/api/auth/signup',{name:'Test Student',email:'test@vitstudent.ac.in',password:'Secure#1234'})).status,201);
-   assert.equal((await request('/api/auth/signup',{name:'Other Student',email:'other@gmail.com',password:'Secure#1234'})).status,400);
-   assert.equal((await request('/api/auth/login',{email:'test@vitstudent.ac.in',password:'wrong-password'})).status,401);
-   const login=await request('/api/auth/login',{email:'test@vitstudent.ac.in',password:'Secure#1234'});assert.equal(login.status,200);token=(await login.json()).token;assert.equal(token.split('.').length,3);
+   assert.equal((await request('/api/auth/signup',{name:'Test Student',email:'test@gmail.com',password:'Secure#1234'})).status,201);
+   assert.equal((await request('/api/auth/signup',{name:'Other Student',email:'other@vitstudent.ac.in',password:'Secure#1234'})).status,400);
+   assert.equal((await request('/api/auth/login',{email:'test@gmail.com',password:'wrong-password'})).status,401);
+   const login=await request('/api/auth/login',{email:'test@gmail.com',password:'Secure#1234'});assert.equal(login.status,200);token=(await login.json()).token;assert.equal(token.split('.').length,3);
    const originalToken=token;token=token.slice(0,-1)+(token.endsWith('a')?'b':'a');assert.equal((await request('/api/state')).status,401);token=originalToken;
    const browse=await request('/api/listings?type=sale&sort=price-asc&limit=1');assert.equal(browse.status,200);const browsePage=await browse.json();assert.equal(browsePage.items.length,1);assert.equal(browsePage.items[0].id,'sample-2');
    assert.equal((await request('/api/me')).status,200);
@@ -29,7 +29,7 @@ test('HTTP workflow: authentication, upload, listing, persistence, CSRF, logout'
    assert.equal((await request('/api/listings/sample-3/status',{status:'returned'},{Origin:'https://evil.example'})).status,403);
    const uploaded=await request('/api/uploads',{data:'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aOXcAAAAASUVORK5CYII='});assert.equal(uploaded.status,200);const {url}=await uploaded.json();assert.equal((await request(url)).status,200);
    const created=await request('/api/listings',{type:'found',title:'Test water bottle',description:'Found this bottle beside the main library.',category:'Other',location:'Main Library',date:new Date().toISOString().slice(0,10),images:[url]});assert.equal(created.status,200);const listing=await created.json();
-   const persisted=JSON.parse(await readFile(join(dir,'state.json'),'utf8'));assert.ok(persisted.listings.some(x=>x.id===listing.id));const account=persisted.users.find(x=>x.email==='test@vitstudent.ac.in');assert.ok(account.passwordHash&&account.passwordSalt);assert.ok(!Object.hasOwn(account,'password'));
+   const persisted=JSON.parse(await readFile(join(dir,'state.json'),'utf8'));assert.ok(persisted.listings.some(x=>x.id===listing.id));const account=persisted.users.find(x=>x.email==='test@gmail.com');assert.ok(account.passwordHash&&account.passwordSalt);assert.ok(!Object.hasOwn(account,'password'));
    assert.equal((await request('/api/uploads',{data:'data:text/html;base64,PGgxPkhlbGxvPC9oMT4='})).status,400);
    await request('/api/logout',{});assert.equal((await request('/api/state')).status,401);
  }finally{child.kill();await new Promise(resolve=>{if(child.exitCode!==null)resolve();else child.once('exit',resolve);});await rm(dir,{recursive:true,force:true});}

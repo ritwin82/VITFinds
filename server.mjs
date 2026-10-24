@@ -33,7 +33,7 @@ const verifyToken = header => {
     return payload;
   } catch { return null; }
 };
-const validEmail = email => { const allowed = (process.env.UNIVERSITY_DOMAINS || 'vitstudent.ac.in').split(',').map(x=>x.trim().toLowerCase()); return /^[^\s@]+@[^\s@]+$/.test(email) && allowed.includes(email.split('@')[1]); };
+const validEmail = email => { const allowed = (process.env.UNIVERSITY_DOMAINS || 'gmail.com').split(',').map(x=>x.trim().toLowerCase()); return /^[^\s@]+@[^\s@]+$/.test(email) && allowed.includes(email.split('@')[1]); };
 const validPassword = password => typeof password === 'string' && password.length >= 10 && password.length <= 128 && /[a-z]/.test(password) && /[A-Z]/.test(password) && /\d/.test(password) && /[^A-Za-z0-9]/.test(password);
 const hashPassword = async password => { const salt = randomBytes(16); const hash = await scrypt(password, salt, 64); return { passwordSalt: salt.toString('base64'), passwordHash: hash.toString('base64') }; };
 const checkPassword = async (password, user) => { if (!user?.passwordHash || !user.passwordSalt) return false; const expected = Buffer.from(user.passwordHash, 'base64'); const actual = await scrypt(password, Buffer.from(user.passwordSalt, 'base64'), expected.length); return actual.length === expected.length && timingSafeEqual(actual, expected); };
@@ -51,7 +51,7 @@ http.createServer(async (req, res) => {
       if (path === '/api/auth/signup' && req.method === 'POST') {
         const name = typeof body.name === 'string' ? body.name.trim() : '', email = typeof body.email === 'string' ? body.email.trim().toLowerCase() : '';
         if (name.length < 2 || name.length > 60) throw new AppError(400, 'Name must be 2–60 characters.');
-        if (!validEmail(email)) throw new AppError(400, 'Use an approved university email address.');
+        if (!validEmail(email)) throw new AppError(400, 'Use a Gmail address (@gmail.com).');
         if (!validPassword(body.password)) throw new AppError(400, 'Password needs 10+ characters with uppercase, lowercase, number, and symbol.');
         const task = queue.then(async()=>{ if (state.users.some(x=>x.email?.toLowerCase()===email)) throw new AppError(409, 'An account with this email already exists.'); const next=structuredClone(state); const user={ id:randomUUID(), name, email, role:'student', verified:false, ...(await hashPassword(body.password)) }; next.users.push(user); const previous=state;state=next;try{await persist();}catch(e){state=previous;throw e;}return { token:signToken(user) }; }); queue=task.catch(()=>{}); return send(201, await task);
       }
